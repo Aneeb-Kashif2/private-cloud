@@ -1,10 +1,77 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root { color-scheme: light; --bg: #f5f7f8; --panel: #ffffff; --ink: #18201f; --muted: #66706e; --line: #dfe5e3; --accent: #19745a; }
-.dark { color-scheme: dark; --bg: #111615; --panel: #18201f; --ink: #f3f7f5; --muted: #9fa9a6; --line: #303a37; --accent: #55c49d; }
+:root {
+  color-scheme: light;
+  --bg: #eef2ed;
+  --panel: #f9fbf8;
+  --panel-2: #e4ebe4;
+  --ink: #101712;
+  --muted: #59675d;
+  --line: #bac8bd;
+  --line-strong: #73877a;
+  --accent: #087b43;
+  --accent-2: #007c91;
+  --danger: #bd2c3c;
+  --glow: rgba(8, 123, 67, 0.16);
+  --grid: rgba(25, 64, 39, 0.055);
+}
+.dark {
+  color-scheme: dark;
+  --bg: #050806;
+  --panel: #0a100c;
+  --panel-2: #101a13;
+  --ink: #d8ffe4;
+  --muted: #769881;
+  --line: #1b3524;
+  --line-strong: #356c47;
+  --accent: #36f57d;
+  --accent-2: #2bd9e7;
+  --danger: #ff5368;
+  --glow: rgba(54, 245, 125, 0.17);
+  --grid: rgba(54, 245, 125, 0.055);
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: Arial, Helvetica, sans-serif; letter-spacing: 0; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  background-color: var(--bg);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0;
+}
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 0, color-mix(in srgb, var(--bg) 86%, transparent) 75%);
+}
 button, input, select { font: inherit; }
 button { cursor: pointer; }
-.focus-ring:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; }
+.focus-ring:focus-visible, button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent); color: #041108; }
+
+.cyber-panel {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 5%, transparent), 0 18px 44px rgba(0, 0, 0, 0.08);
+}
+.dark .cyber-panel { box-shadow: inset 0 1px 0 rgba(54, 245, 125, 0.05), 0 0 28px rgba(0, 0, 0, 0.32); }
+.cyber-kicker { color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.cyber-kicker::before { content: "> "; }
+.cyber-button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #041108;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--accent) 30%, var(--ink));
+}
+.cyber-button:hover { transform: translate(1px, 1px); box-shadow: 2px 2px 0 color-mix(in srgb, var(--accent) 30%, var(--ink)); }
+.cyber-input { border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.cyber-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--glow); outline: none; }
+.scanline { position: relative; overflow: hidden; }
+.scanline::after { position: absolute; inset: 0; content: ""; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.025) 3px 4px); }
+.status-dot { display: inline-block; width: 7px; height: 7px; background: var(--accent); box-shadow: 0 0 9px var(--accent); }
