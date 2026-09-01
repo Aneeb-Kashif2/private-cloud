@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+.next/
+dist/
+build/
+out/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Runtime output
+*.log
+logs/
+*.pid
+*.pid.lock
+
+# Local databases and uploads
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+uploads/
+
+# Test and tooling output
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local certificates
+*.pem
+*.key
+*.crt

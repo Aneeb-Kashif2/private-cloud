@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root { color-scheme: light; --bg: #f5f7f8; --panel: #ffffff; --ink: #18201f; --muted: #66706e; --line: #dfe5e3; --accent: #19745a; }
+.dark { color-scheme: dark; --bg: #111615; --panel: #18201f; --ink: #f3f7f5; --muted: #9fa9a6; --line: #303a37; --accent: #55c49d; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: Arial, Helvetica, sans-serif; letter-spacing: 0; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.focus-ring:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; }

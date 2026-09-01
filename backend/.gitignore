@@ -1,0 +1,26 @@
+# Dependencies and compiled output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime and test output
+*.log
+logs/
+*.pid
+.nyc_output/
+test-results/
+
+# Local databases and uploaded objects
+prisma/*.db
+prisma/*.db-journal
+uploads/
+
+# Keep Prisma migrations tracked
+!prisma/migrations/
+!prisma/migrations/**

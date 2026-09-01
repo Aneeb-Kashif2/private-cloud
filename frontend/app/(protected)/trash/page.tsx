@@ -1,0 +1,2 @@
+import { Trash2 } from "lucide-react";
+export default function TrashPage(){return <div className="grid min-h-[60vh] place-items-center text-center"><div><Trash2 className="mx-auto text-[var(--muted)]" size={42}/><h1 className="mt-4 text-xl font-semibold">Trash is not enabled</h1><p className="mt-2 max-w-sm text-sm text-[var(--muted)]">This secure MVP permanently deletes confirmed items. Recoverable trash is planned for a later release.</p></div></div>}
