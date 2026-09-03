@@ -41,7 +41,7 @@ docker compose up --build
 | `AWS_S3_BUCKET` | Private bucket name |
 | `AUTH_SECRET` | 32+ character cookie/plugin secret, server only |
 | `NEXT_PUBLIC_API_URL` | Browser-visible API base URL |
-| `FRONTEND_ORIGIN` | Exact allowed browser origin |
+| `FRONTEND_ORIGIN` | Comma-separated exact browser-origin allowlist |
 | `DEFAULT_STORAGE_LIMIT_BYTES` | New-account quota; default 10 GiB |
 | `MAX_FILE_SIZE_BYTES` | Per-file limit; default 5 GiB |
 | `PRESIGNED_URL_TTL_SECONDS` | Signed URL lifetime, maximum 900 seconds |
@@ -59,7 +59,7 @@ Generate an auth secret with `openssl rand -base64 48`.
 ```json
 [
   {
-    "AllowedOrigins": ["http://localhost:3000"],
+    "AllowedOrigins": ["http://localhost:3000", "http://localhost:3001"],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
     "AllowedHeaders": ["Content-Type"],
     "ExposeHeaders": ["ETag"],

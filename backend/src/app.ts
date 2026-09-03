@@ -20,14 +20,15 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
   app.decorate("config", config);
   app.decorate("prisma", overrides.prisma ?? new PrismaClient());
   app.decorate("s3", overrides.s3 ?? createS3(config));
+  const allowedOrigins = new Set(config.FRONTEND_ORIGIN.split(",").map(origin => origin.trim()));
   await app.register(helmet);
   await app.register(cookie, { secret: config.AUTH_SECRET });
-  await app.register(cors, { origin: config.FRONTEND_ORIGIN, credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] });
+  await app.register(cors, { origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] });
   await app.register(rateLimit, { global: false });
   app.addHook("onRequest", async request => {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.origin;
-      if (origin && origin !== config.FRONTEND_ORIGIN) throw new AppError(403, "Request origin is not allowed", "INVALID_ORIGIN");
+      if (origin && !allowedOrigins.has(origin)) throw new AppError(403, "Request origin is not allowed", "INVALID_ORIGIN");
     }
   });
   await app.register(authPlugin);

@@ -107,7 +107,7 @@ AUTH_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 NEXT_PUBLIC_API_URL=http://localhost:4000/api
 
 # Exact frontend origin accepted by CORS and origin protection
-FRONTEND_ORIGIN=http://localhost:3000
+FRONTEND_ORIGIN=http://localhost:3000,http://localhost:3001
 
 # Backend runtime
 PORT=4000
@@ -151,7 +151,7 @@ Example development bucket CORS configuration:
 ```json
 [
   {
-    "AllowedOrigins": ["http://localhost:3000"],
+    "AllowedOrigins": ["http://localhost:3000", "http://localhost:3001"],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
     "AllowedHeaders": ["Content-Type"],
     "ExposeHeaders": ["ETag"],

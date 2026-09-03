@@ -9,7 +9,7 @@ const schema = z.object({
   AWS_REGION: z.string().min(1),
   AWS_S3_BUCKET: z.string().min(1),
   AUTH_SECRET: z.string().min(32),
-  FRONTEND_ORIGIN: z.string().url().default("http://localhost:3000"),
+  FRONTEND_ORIGIN: z.string().min(1).refine(value => value.split(",").every(origin => z.string().url().safeParse(origin.trim()).success), "Must contain comma-separated valid URLs").default("http://localhost:3000"),
   PORT: z.coerce.number().int().positive().default(4000),
   DEFAULT_STORAGE_LIMIT_BYTES: z.coerce.bigint().positive().default(10n * 1024n ** 3n),
   MAX_FILE_SIZE_BYTES: z.coerce.bigint().positive().default(5n * 1024n ** 3n),
