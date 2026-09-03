@@ -34,7 +34,9 @@ const routes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/logout", { preHandler: app.authenticate }, async (request, reply) => {
+    const token = request.cookies[SESSION_COOKIE];
     await app.prisma.session.delete({ where: { id: request.sessionId } });
+    if (token) await app.redis.del(`session:${hashToken(token)}`).catch(() => undefined);
     reply.clearCookie(SESSION_COOKIE, cookieOptions(app.config.NODE_ENV === "production"));
     return reply.code(204).send();
   });

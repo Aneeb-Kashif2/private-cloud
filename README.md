@@ -1,10 +1,10 @@
 # Self Cloud
 
-Self Cloud is a secure cloud-storage MVP with a Next.js client, Fastify API, PostgreSQL metadata, Prisma ORM, opaque cookie sessions, and direct private Amazon S3 uploads.
+Self Cloud is a secure cloud-storage MVP with a Next.js client, Fastify API, Redis coordination/cache, PostgreSQL metadata, Prisma ORM, opaque cookie sessions, and direct private Amazon S3 uploads.
 
 ## Architecture
 
-The browser asks the API for a presigned `PutObject` URL, uploads directly to S3, and asks the API to complete the upload. Completion calls `HeadObject` and verifies the stored byte size and content type before creating metadata and moving reserved quota into used quota. Downloads are short-lived presigned URLs. Files never pass through PostgreSQL or the API server.
+Fastify uses Redis for session lookups, distributed rate limits, upload locks, and short-lived metadata caching. PostgreSQL remains the durable source of truth. The browser asks the API for a presigned `PutObject` URL, uploads directly to S3, and asks the API to complete the upload. Completion calls `HeadObject` and verifies the stored byte size and content type before creating metadata and moving reserved quota into used quota. Downloads are short-lived presigned URLs. Files never pass through PostgreSQL or the API server.
 
 ## Local development
 
@@ -13,7 +13,7 @@ Requirements: Node.js 22+, npm 9+, Docker, an AWS account, and a private S3 buck
 ```bash
 cp .env.example .env
 # Fill in AWS_S3_BUCKET, AWS credentials, and a strong AUTH_SECRET.
-docker compose up -d postgres
+docker compose up -d postgres redis
 npm install
 npm run prisma:generate --workspace backend
 npm run prisma:migrate --workspace backend
@@ -35,6 +35,8 @@ docker compose up --build
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string, server only |
+| `REDIS_URL` | Redis for session cache, rate limits, upload locks, and metadata |
+| `CACHE_TTL_SECONDS` | Metadata cache lifetime; default 60 seconds |
 | `AWS_ACCESS_KEY_ID` | AWS credential, server only |
 | `AWS_SECRET_ACCESS_KEY` | AWS credential, server only |
 | `AWS_REGION` | Bucket region |
@@ -46,6 +48,7 @@ docker compose up --build
 | `MAX_FILE_SIZE_BYTES` | Per-file limit; default 5 GiB |
 | `PRESIGNED_URL_TTL_SECONDS` | Signed URL lifetime, maximum 900 seconds |
 | `SESSION_TTL_DAYS` | Session lifetime |
+| `UPLOAD_LOCK_TTL_MS` | Distributed upload-lock lifetime |
 
 Generate an auth secret with `openssl rand -base64 48`.
 

@@ -17,6 +17,7 @@ The application stores users, sessions, folders, quotas, and file metadata in Po
 | Validation | Zod | Validates API request bodies, parameters, and environment values |
 | ORM | Prisma | Safe PostgreSQL queries, relations, and migrations |
 | Database | PostgreSQL | Users, sessions, folders, quotas, and file metadata |
+| Coordination and cache | Redis | Session cache, distributed rate limits, upload locks, and hot metadata |
 | File storage | Amazon S3 | Private storage for actual uploaded files |
 | Password security | Argon2id | Secure password hashing |
 | Authentication | Opaque database sessions | HTTP-only cookie authentication |
@@ -24,6 +25,14 @@ The application stores users, sessions, folders, quotas, and file metadata in Po
 | Testing | Vitest and Fastify Inject | API and authorization integration tests |
 
 ## Main Application Flow
+
+```text
+User
+  -> Fastify
+      -> Redis: session cache, rate limits, upload locks, hot metadata
+      -> PostgreSQL: durable users, sessions, folders, files, and quotas
+      -> Amazon S3: private file objects
+```
 
 ### Registration
 
@@ -94,6 +103,10 @@ Create a root `.env` and a `backend/.env`. For local development they can contai
 # PostgreSQL connection used by Prisma and Fastify
 DATABASE_URL=postgresql://selfcloud:selfcloud@localhost:5432/selfcloud?schema=public
 
+# Redis coordination and cache
+REDIS_URL=redis://localhost:6379
+CACHE_TTL_SECONDS=60
+
 # AWS credentials used only by the backend
 AWS_ACCESS_KEY_ID=your-iam-access-key-id
 AWS_SECRET_ACCESS_KEY=your-iam-secret-access-key
@@ -124,6 +137,7 @@ PRESIGNED_URL_TTL_SECONDS=600
 
 # Login session lifetime
 SESSION_TTL_DAYS=30
+UPLOAD_LOCK_TTL_MS=10000
 ```
 
 Never expose `DATABASE_URL`, `AWS_SECRET_ACCESS_KEY`, or `AUTH_SECRET` using a `NEXT_PUBLIC_` prefix. Only `NEXT_PUBLIC_API_URL` is intended for browser code.
@@ -163,8 +177,8 @@ Example development bucket CORS configuration:
 ## Local Development Commands
 
 ```bash
-# Start PostgreSQL
-docker compose up -d postgres
+# Start PostgreSQL and Redis
+docker compose up -d postgres redis
 
 # Install dependencies
 npm install

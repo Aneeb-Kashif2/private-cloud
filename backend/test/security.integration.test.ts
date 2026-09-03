@@ -3,14 +3,17 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { Config } from "../src/config.js";
+import type { RedisService } from "../src/lib/redis.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const run = databaseUrl ? describe : describe.skip;
 run("security integration", () => {
   const prisma = new PrismaClient({ datasourceUrl: databaseUrl }); let app: FastifyInstance; const objects = new Map<string,{size:bigint;type:string}>();
-  const config:Config={NODE_ENV:"test",DATABASE_URL:databaseUrl!,AWS_ACCESS_KEY_ID:"test",AWS_SECRET_ACCESS_KEY:"test",AWS_REGION:"us-east-1",AWS_S3_BUCKET:"private-test",AUTH_SECRET:"a".repeat(32),FRONTEND_ORIGIN:"http://localhost:3000",PORT:4000,DEFAULT_STORAGE_LIMIT_BYTES:1000n,MAX_FILE_SIZE_BYTES:1000n,PRESIGNED_URL_TTL_SECONDS:600,SESSION_TTL_DAYS:30};
+  const config:Config={NODE_ENV:"test",DATABASE_URL:databaseUrl!,REDIS_URL:"redis://localhost:6379",CACHE_TTL_SECONDS:60,AWS_ACCESS_KEY_ID:"test",AWS_SECRET_ACCESS_KEY:"test",AWS_REGION:"us-east-1",AWS_S3_BUCKET:"private-test",AUTH_SECRET:"a".repeat(32),FRONTEND_ORIGIN:"http://localhost:3000",PORT:4000,DEFAULT_STORAGE_LIMIT_BYTES:1000n,MAX_FILE_SIZE_BYTES:1000n,PRESIGNED_URL_TTL_SECONDS:600,SESSION_TTL_DAYS:30,UPLOAD_LOCK_TTL_MS:10000};
   const s3={uploadUrl:async(key:string,type:string)=>{objects.set(key,{size:0n,type});return `https://upload.test/${key}`},downloadUrl:async(key:string)=>`https://download.test/${key}`,head:async(key:string)=>{const o=objects.get(key);if(!o)throw new Error();return{ContentLength:Number(o.size),ContentType:o.type,$metadata:{}}},remove:async(key:string)=>{if(!objects.has(key))throw new Error();objects.delete(key)}};
-  beforeAll(async()=>{app=await buildApp({config,prisma,s3});await app.ready();await prisma.uploadIntent.deleteMany();await prisma.session.deleteMany();await prisma.file.deleteMany();await prisma.folder.deleteMany();await prisma.user.deleteMany()});
+  const cache=new Map<string,string>();
+  const redis:RedisService={getJson:async<T>(key:string)=>cache.has(key)?JSON.parse(cache.get(key)!) as T:null,setJson:async(key,value)=>{cache.set(key,JSON.stringify(value))},del:async(...keys)=>{keys.forEach(key=>cache.delete(key))},withLock:async(_key,_ttl,task)=>task(),close:async()=>undefined};
+  beforeAll(async()=>{app=await buildApp({config,prisma,s3,redis});await app.ready();await prisma.uploadIntent.deleteMany();await prisma.session.deleteMany();await prisma.file.deleteMany();await prisma.folder.deleteMany();await prisma.user.deleteMany()});
   afterAll(async()=>{await app.close();await prisma.$disconnect()});
   const register=async(email:string)=>{const response=await app.inject({method:"POST",url:"/api/auth/register",headers:{origin:config.FRONTEND_ORIGIN},payload:{name:"Test User",email,password:"SecurePass1!",confirmPassword:"SecurePass1!"}});return{response,cookie:response.cookies[0]?.value,header:`selfcloud_session=${response.cookies[0]?.value}`}};
   it("registers a user and creates a root folder",async()=>{const {response}=await register("register@example.com");expect(response.statusCode).toBe(201);const user=await prisma.user.findUniqueOrThrow({where:{email:"register@example.com"},include:{folders:true}});expect(user.passwordHash).not.toContain("SecurePass1!");expect(user.folders.some(f=>f.isRoot)).toBe(true);expect(response.body).not.toContain("passwordHash")});

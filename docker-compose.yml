@@ -13,6 +13,17 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports: ["6379:6379"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   backend:
     build:
       context: .
@@ -20,11 +31,13 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://selfcloud:selfcloud@postgres:5432/selfcloud?schema=public
+      REDIS_URL: redis://redis:6379
       FRONTEND_ORIGIN: http://localhost:3000
     command: ["sh", "-c", "npx prisma migrate deploy --schema backend/prisma/schema.prisma && node backend/dist/src/server.js"]
     ports: ["4000:4000"]
     depends_on:
       postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
   frontend:
     build:
       context: .
@@ -34,3 +47,4 @@ services:
     depends_on: [backend]
 volumes:
   postgres_data:
+  redis_data:

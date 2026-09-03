@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
 import { jsonSafe } from "../../lib/serialize.js";
+import { cacheKeys, invalidateUserMetadata } from "../../lib/cache.js";
 
 const allowedMime = /^(image\/|video\/|audio\/|text\/|application\/(pdf|zip|gzip|json|xml|msword|vnd\.|octet-stream))/i;
 const idParams = z.object({ id: z.string().uuid() });
@@ -18,14 +19,14 @@ const routes: FastifyPluginAsync = async app => {
     const cleanName = input.filename.replace(/[^A-Za-z0-9._ -]/g, "_");
     const s3Key = `users/${request.user.id}/files/${fileId}-${cleanName}`;
     const expiresAt = new Date(Date.now() + 15 * 60_000);
-    const intent = await app.prisma.$transaction(async tx => {
+    const intent = await app.redis.withLock(`upload:user:${request.user.id}`, app.config.UPLOAD_LOCK_TTL_MS, () => app.prisma.$transaction(async tx => {
       const updated = await tx.user.updateMany({
         where: { id: request.user.id, storageUsed: { lte: request.user.storageLimit - input.size }, storageReserved: { lte: request.user.storageLimit - request.user.storageUsed - input.size } },
         data: { storageReserved: { increment: input.size } },
       });
       if (updated.count !== 1) throw new AppError(413, "Not enough available storage", "QUOTA_EXCEEDED");
       return tx.uploadIntent.create({ data: { id: fileId, userId: request.user.id, folderId: folder.id, originalName: input.filename, s3Key, mimeType: input.mimeType, size: input.size, expiresAt } });
-    });
+    }));
     try {
       const uploadUrl = await app.s3.uploadUrl(s3Key, input.mimeType);
       return reply.code(201).send(jsonSafe({ uploadId: intent.id, uploadUrl, expiresAt }));
@@ -37,21 +38,24 @@ const routes: FastifyPluginAsync = async app => {
 
   app.post("/complete", { preHandler: app.authenticate }, async request => {
     const { uploadId } = z.object({ uploadId: z.string().uuid() }).parse(request.body);
-    const intent = await app.prisma.uploadIntent.findFirst({ where: { id: uploadId, userId: request.user.id, status: "PENDING" } });
-    if (!intent || intent.expiresAt <= new Date()) throw new AppError(404, "Upload is invalid or expired", "UPLOAD_NOT_FOUND");
-    let object;
-    try { object = await app.s3.head(intent.s3Key); } catch { throw new AppError(409, "Upload has not reached storage", "UPLOAD_INCOMPLETE"); }
-    if (BigInt(object.ContentLength ?? -1) !== intent.size || object.ContentType !== intent.mimeType) {
-      await app.s3.remove(intent.s3Key).catch(() => undefined);
-      throw new AppError(409, "Uploaded object does not match the request", "UPLOAD_MISMATCH");
-    }
-    const file = await app.prisma.$transaction(async tx => {
-      const claimed = await tx.uploadIntent.updateMany({ where: { id: intent.id, userId: request.user.id, status: "PENDING" }, data: { status: "COMPLETED" } });
-      if (claimed.count !== 1) throw new AppError(409, "Upload was already completed", "UPLOAD_COMPLETED");
-      const created = await tx.file.create({ data: { id: intent.id, userId: intent.userId, folderId: intent.folderId, originalName: intent.originalName, s3Key: intent.s3Key, mimeType: intent.mimeType, size: intent.size } });
-      await tx.user.update({ where: { id: request.user.id }, data: { storageReserved: { decrement: intent.size }, storageUsed: { increment: intent.size } } });
-      return created;
+    const file = await app.redis.withLock(`upload:user:${request.user.id}`, app.config.UPLOAD_LOCK_TTL_MS, async () => {
+      const intent = await app.prisma.uploadIntent.findFirst({ where: { id: uploadId, userId: request.user.id, status: "PENDING" } });
+      if (!intent || intent.expiresAt <= new Date()) throw new AppError(404, "Upload is invalid or expired", "UPLOAD_NOT_FOUND");
+      let object;
+      try { object = await app.s3.head(intent.s3Key); } catch { throw new AppError(409, "Upload has not reached storage", "UPLOAD_INCOMPLETE"); }
+      if (BigInt(object.ContentLength ?? -1) !== intent.size || object.ContentType !== intent.mimeType) {
+        await app.s3.remove(intent.s3Key).catch(() => undefined);
+        throw new AppError(409, "Uploaded object does not match the request", "UPLOAD_MISMATCH");
+      }
+      return app.prisma.$transaction(async tx => {
+        const claimed = await tx.uploadIntent.updateMany({ where: { id: intent.id, userId: request.user.id, status: "PENDING" }, data: { status: "COMPLETED" } });
+        if (claimed.count !== 1) throw new AppError(409, "Upload was already completed", "UPLOAD_COMPLETED");
+        const created = await tx.file.create({ data: { id: intent.id, userId: intent.userId, folderId: intent.folderId, originalName: intent.originalName, s3Key: intent.s3Key, mimeType: intent.mimeType, size: intent.size } });
+        await tx.user.update({ where: { id: request.user.id }, data: { storageReserved: { decrement: intent.size }, storageUsed: { increment: intent.size } } });
+        return created;
+      });
     });
+    await invalidateUserMetadata(app, request.user.id, cacheKeys.folder(request.user.id, file.folderId));
     return jsonSafe({ file });
   });
 
@@ -65,9 +69,14 @@ const routes: FastifyPluginAsync = async app => {
 
   app.get("/:id", { preHandler: app.authenticate }, async request => {
     const { id } = idParams.parse(request.params);
+    const key = cacheKeys.file(request.user.id, id);
+    const cached = await app.redis.getJson<{ file: unknown }>(key).catch(() => null);
+    if (cached) return cached;
     const file = await app.prisma.file.findFirst({ where: { id, userId: request.user.id }, include: { folder: { select: { id: true, name: true } } } });
     if (!file) throw new AppError(404, "File not found", "NOT_FOUND");
-    return jsonSafe({ file });
+    const response = jsonSafe({ file });
+    await app.redis.setJson(key, response, app.config.CACHE_TTL_SECONDS).catch(() => undefined);
+    return response;
   });
   app.get("/:id/download", { preHandler: app.authenticate }, async request => {
     const { id } = idParams.parse(request.params);
@@ -82,6 +91,7 @@ const routes: FastifyPluginAsync = async app => {
     if (!folder) throw new AppError(404, "Folder not found", "NOT_FOUND");
     const result = await app.prisma.file.updateMany({ where: { id, userId: request.user.id }, data: { folderId } });
     if (!result.count) throw new AppError(404, "File not found", "NOT_FOUND");
+    await invalidateUserMetadata(app, request.user.id, cacheKeys.file(request.user.id, id), cacheKeys.folder(request.user.id, folderId));
     return { success: true };
   });
   app.delete("/:id", { preHandler: app.authenticate }, async (request, reply) => {
@@ -93,6 +103,7 @@ const routes: FastifyPluginAsync = async app => {
       const removed = await tx.file.deleteMany({ where: { id, userId: request.user.id } });
       if (removed.count) await tx.user.update({ where: { id: request.user.id }, data: { storageUsed: { decrement: file.size } } });
     });
+    await invalidateUserMetadata(app, request.user.id, cacheKeys.file(request.user.id, id), cacheKeys.folder(request.user.id, file.folderId));
     return reply.code(204).send();
   });
 };
