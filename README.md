@@ -1,131 +1,81 @@
-# Self Cloud
+# Secure-Cloud
 
-Self Cloud is a secure cloud-storage MVP with a Next.js client, Fastify API, Redis coordination/cache, PostgreSQL metadata, Prisma ORM, opaque cookie sessions, and direct private Amazon S3 uploads.
+Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cache. The Ubuntu laptop running the API is the storage server. File bytes stream to and from `/srv/secure-cloud-storage`; PostgreSQL stores only metadata, authentication and quota counters.
 
-## Architecture
+## Ubuntu setup
 
-Fastify uses Redis for session lookups, distributed rate limits, upload locks, and short-lived metadata caching. PostgreSQL remains the durable source of truth. The browser asks the API for a presigned `PutObject` URL, uploads directly to S3, and asks the API to complete the upload. Completion calls `HeadObject` and verifies the stored byte size and content type before creating metadata and moving reserved quota into used quota. Downloads are short-lived presigned URLs. Files never pass through PostgreSQL or the API server.
-
-## Local development
-
-Requirements: Node.js 22+, npm 9+, Docker, an AWS account, and a private S3 bucket.
+Use Node.js 22+, npm, PostgreSQL and Redis installed directly on Ubuntu. No container or separate disk setup is needed.
 
 ```bash
+sudo apt update
+sudo apt install postgresql redis-server
+sudo systemctl enable --now postgresql redis-server
+# Run the application as this ordinary user; substitute your service account if needed.
+sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" /srv/secure-cloud-storage
+sudo -u postgres createuser --pwprompt selfcloud
+sudo -u postgres createdb --owner=selfcloud selfcloud
 cp .env.example .env
-# Fill in AWS_S3_BUCKET, AWS credentials, and a strong AUTH_SECRET.
-docker compose up -d postgres redis
-npm install
+# Set DATABASE_URL, AUTH_SECRET and your browser-facing origins/URLs.
+cp .env backend/.env
+npm ci
 npm run prisma:generate --workspace backend
-npm run prisma:migrate --workspace backend
+npm run prisma:deploy --workspace backend
 npm run dev
 ```
 
-Open `http://localhost:3000`. The API listens on `http://localhost:4000`; health is available at `/health`.
+Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=http://localhost:4000/api` for local development, or the API URL reachable from your client devices. Open port 3000 in the browser. In production, build with that URL configured, then run `npm start --workspace backend` and `npm start --workspace frontend` under your service manager. Use HTTPS with a reverse proxy; keep PostgreSQL and Redis private. The proxy must allow 5 GiB request bodies and sufficiently long streaming requests, with upload buffering disabled. Do not serve the storage directory as a static directory.
 
-To run everything in containers:
-
-```bash
-cp .env.example .env
-# Fill in required secrets.
-docker compose up --build
-```
-
-## Environment
+## Configuration
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string, server only |
-| `REDIS_URL` | Redis for session cache, rate limits, upload locks, and metadata |
-| `CACHE_TTL_SECONDS` | Metadata cache lifetime; default 60 seconds |
-| `AWS_ACCESS_KEY_ID` | AWS credential, server only |
-| `AWS_SECRET_ACCESS_KEY` | AWS credential, server only |
-| `AWS_REGION` | Bucket region |
-| `AWS_S3_BUCKET` | Private bucket name |
-| `AUTH_SECRET` | 32+ character cookie/plugin secret, server only |
-| `NEXT_PUBLIC_API_URL` | Browser-visible API base URL |
-| `FRONTEND_ORIGIN` | Comma-separated exact browser-origin allowlist |
-| `DEFAULT_STORAGE_LIMIT_BYTES` | New-account quota; default 10 GiB |
-| `MAX_FILE_SIZE_BYTES` | Per-file limit; default 5 GiB |
-| `PRESIGNED_URL_TTL_SECONDS` | Signed URL lifetime, maximum 900 seconds |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `REDIS_URL` | Redis connection URL |
+| `AUTH_SECRET` | At least 32 random characters |
+| `FRONTEND_ORIGIN` | Comma-separated allowed browser origins |
+| `NEXT_PUBLIC_API_URL` | Browser-accessible API URL ending in `/api` |
+| `PORT` | API port, default 4000 |
+| `STORAGE_PATH` | Absolute directory, default `/srv/secure-cloud-storage` |
+| `STORAGE_LIMIT_BYTES` | Required per-user quota: `5368709120` (5 GiB) |
+| `MAX_FILE_SIZE_BYTES` | Maximum single upload, default 5 GiB |
+| `CACHE_TTL_SECONDS` | Metadata cache lifetime |
 | `SESSION_TTL_DAYS` | Session lifetime |
-| `UPLOAD_LOCK_TTL_MS` | Distributed upload-lock lifetime |
 
-Generate an auth secret with `openssl rand -base64 48`.
+All deployed accounts receive the 5 GiB limit during migration, including existing users. Accounts already over quota retain their metadata but cannot upload until usage is reduced. The upload quota check always uses current PostgreSQL counters, never cached session data.
 
-## Amazon S3 setup
+The backend automatically applies pending Prisma migrations before `npm run dev` and `npm start`. Development also regenerates the Prisma client. Startup stops if migration fails, preventing the API from serving requests against an outdated schema.
 
-1. Create an S3 bucket in the configured region.
-2. Keep all four **Block Public Access** settings enabled. Do not add a public bucket policy or ACL.
-3. Enable default encryption (SSE-S3 or SSE-KMS) and bucket versioning as desired.
-4. Add this bucket CORS configuration, replacing the origin for production:
+## File workflow
 
-```json
-[
-  {
-    "AllowedOrigins": ["http://localhost:3000", "http://localhost:3001"],
-    "AllowedMethods": ["PUT", "GET", "HEAD"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 600
-  }
-]
-```
+- `POST /api/files/upload?filename=...&size=...&mimeType=...&folderId=...`: authenticated binary body with `Content-Type: application/octet-stream`. The API reserves quota atomically, streams bytes to a private UUID filename, verifies the exact byte count, then commits file metadata and moves reserved bytes to `storageUsed` in one transaction. Empty files are supported. Failed or disconnected uploads remove partial files and release reservations.
+- `GET /api/files/:id/download`: authenticated attachment stream. Ownership is checked before opening content.
+- `GET /api/files`: owner-scoped listing, search, MIME filter, sorting and pagination.
+- Folder routes and file moves use PostgreSQL metadata; folder names never become disk paths.
+- `DELETE /api/files/:id`: removes file content permanently, then transactionally deletes metadata and decrements usage once. Missing content allows deletion to be retried; other filesystem failures retain metadata and quota.
 
-5. Give the backend identity only the required bucket permissions:
+Files have mode `0600` inside a private directory. Only generated UUID keys are accepted, file creation is exclusive, and symlinks are not followed. User filenames appear only in metadata and encoded download headers.
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
-    "Resource": "arn:aws:s3:::YOUR_BUCKET/users/*"
-  }]
-}
-```
+## Existing installations and recovery
 
-`HeadObject` is authorized by `s3:GetObject`. In production, prefer an IAM role/workload identity over long-lived access keys. The bucket must not allow public access.
+Back up PostgreSQL and existing file content before deploying. Historical SQL migrations remain unchanged so Prisma migration checksums stay valid; the new migration renames the storage-key column, removes obsolete upload intents, clears old reservations and sets the quota. It does not fetch or move historical content. Before resuming service, place each existing file's bytes at `/srv/secure-cloud-storage/<file UUID>` and update its `storageKey` to that UUID. Confirm bytes and sizes from your existing export/backup. Do not deploy against existing remote-only files without completing that transfer.
 
-## Database and maintenance
+Filesystem operations and database transactions cannot commit together. After a forced process termination or database outage, stop every API process before maintenance: reconcile disk files with metadata, remove orphan UUID files, and reset `storageReserved` to zero. Run `npm run prisma:recalculate --workspace backend` while the API is stopped to rebuild usage from metadata. A delete whose database commit failed can be retried. Back up the storage directory and PostgreSQL together. Do not manually alter content while the API runs.
+
+## Validation
 
 ```bash
-# Development migration
-npm run prisma:migrate --workspace backend
-
-# Deploy committed migrations
-npm run prisma:deploy --workspace backend
-
-# Repair every user's used-storage counter from File rows
-npm run prisma:recalculate --workspace backend
-```
-
-Core models are `User`, `Session`, `Folder`, `File`, and `UploadIntent`. The latter reserves quota and makes completion auditable/idempotent. Folder and file queries include the authenticated `userId`; root folders cannot be renamed or deleted.
-
-## API
-
-- `POST /api/auth/register`, `/login`, `/logout`; `GET /api/auth/me`
-- `GET /api/storage`; `POST /api/storage/recalculate`
-- `POST /api/files/upload-url`, `/complete`; `GET /api/files`
-- `GET /api/files/:id`, `/api/files/:id/download`
-- `PATCH /api/files/:id`; `DELETE /api/files/:id`
-- `GET /api/folders`; `POST /api/folders`
-- `GET`, `PATCH`, `DELETE /api/folders/:id`
-
-All routes except registration and login require an HTTP-only opaque session cookie. Mutating browser requests are protected by exact-origin validation, and authentication endpoints are rate-limited.
-
-## Verification
-
-Tests require a migrated PostgreSQL test database. Never point them at production.
-
-```bash
-TEST_DATABASE_URL=postgresql://selfcloud:selfcloud@localhost:5432/selfcloud?schema=public npm test
 npm run typecheck
+npm test
 npm run build
 ```
 
-## MVP limitations
+Filesystem tests run without services. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
 
-- Upload intents reserve quota for 15 minutes, but automated expiry/release should be run by a scheduled worker in a multi-instance production deployment.
-- S3 `PutObject` presigning supports files up to S3's single-PUT limit (5 GiB). Larger files need multipart upload orchestration.
-- Folder deletion is intentionally limited to empty folders. Trash, sharing, resumable uploads, antivirus scanning, email verification, password reset, and MFA are future features.
-- Horizontal deployments should use a shared rate-limit store such as Redis.
+```bash
+DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:deploy --workspace backend
+npm test
+```
+
+Integration coverage includes authentication, ownership, upload/download bytes, quota concurrency, failed-upload cleanup and permanent-delete accounting.
+
+Development uses `frontend/.next-dev`; production builds use `frontend/.next`. Keeping these separate prevents missing vendor chunks when building while the dev server runs.

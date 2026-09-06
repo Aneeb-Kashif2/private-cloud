@@ -15,7 +15,7 @@ const routes: FastifyPluginAsync = async (app) => {
     if (await app.prisma.user.findUnique({ where: { email: input.email }, select: { id: true } })) throw new AppError(409, "An account with this email already exists", "EMAIL_EXISTS");
     const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
     const user = await app.prisma.$transaction(async tx => {
-      const created = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash, storageLimit: app.config.DEFAULT_STORAGE_LIMIT_BYTES } });
+      const created = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash, storageLimit: app.config.STORAGE_LIMIT_BYTES } });
       await tx.folder.create({ data: { userId: created.id, name: "My Files", isRoot: true } });
       return created;
     });

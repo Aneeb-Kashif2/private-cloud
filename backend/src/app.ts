@@ -7,7 +7,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { loadConfig, type Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
-import { createS3, type S3Service } from "./lib/s3.js";
+import { createLocalStorage, type LocalStorage } from "./lib/storage.js";
 import { createRedis, type RedisService } from "./lib/redis.js";
 import authRoutes from "./modules/auth/routes.js";
 import fileRoutes from "./modules/files/routes.js";
@@ -15,12 +15,12 @@ import folderRoutes from "./modules/folders/routes.js";
 import storageRoutes from "./modules/storage/routes.js";
 import authPlugin from "./plugins/auth.js";
 
-export async function buildApp(overrides: { config?: Config; prisma?: PrismaClient; s3?: S3Service; redis?: RedisService } = {}) {
+export async function buildApp(overrides: { config?: Config; prisma?: PrismaClient; storage?: LocalStorage; redis?: RedisService } = {}) {
   const config = overrides.config ?? loadConfig();
   const app = Fastify({ logger: { level: config.NODE_ENV === "test" ? "silent" : "info", redact: ["req.headers.authorization", "req.headers.cookie", "body.password", "body.confirmPassword"] }, trustProxy: config.NODE_ENV === "production" });
   app.decorate("config", config);
   app.decorate("prisma", overrides.prisma ?? new PrismaClient());
-  app.decorate("s3", overrides.s3 ?? createS3(config));
+  app.decorate("storage", overrides.storage ?? await createLocalStorage(config.STORAGE_PATH));
   app.decorate("redis", overrides.redis ?? createRedis(config));
   const allowedOrigins = new Set(config.FRONTEND_ORIGIN.split(",").map(origin => origin.trim()));
   await app.register(helmet);
@@ -33,12 +33,6 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
       if (origin && !allowedOrigins.has(origin)) throw new AppError(403, "Request origin is not allowed", "INVALID_ORIGIN");
     }
   });
-  await app.register(authPlugin);
-  await app.register(authRoutes, { prefix: "/api/auth" });
-  await app.register(storageRoutes, { prefix: "/api/storage" });
-  await app.register(fileRoutes, { prefix: "/api/files" });
-  await app.register(folderRoutes, { prefix: "/api/folders" });
-  app.get("/health", async () => ({ status: "ok", redis: app.redis.client?.status ?? "test-adapter" }));
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Invalid request", details: error.issues.map(i => ({ path: i.path.join("."), message: i.message })) } });
     if (error instanceof AppError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
@@ -46,6 +40,12 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
     app.log.error(error);
     return reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" } });
   });
+  await app.register(authPlugin);
+  await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(storageRoutes, { prefix: "/api/storage" });
+  await app.register(fileRoutes, { prefix: "/api/files" });
+  await app.register(folderRoutes, { prefix: "/api/folders" });
+  app.get("/health", async () => ({ status: "ok", redis: app.redis.client?.status ?? "test-adapter" }));
   app.addHook("onClose", async () => { if (!overrides.prisma) await app.prisma.$disconnect(); if (!overrides.redis) await app.redis.close(); });
   return app;
 }

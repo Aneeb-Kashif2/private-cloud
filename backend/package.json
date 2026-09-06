@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --max-warnings=0",
     "test": "vitest run",
@@ -14,11 +14,11 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:recalculate": "tsx src/scripts/recalculate-storage.ts"
+    "prisma:recalculate": "tsx src/scripts/recalculate-storage.ts",
+    "predev": "npm run prisma:deploy && npm run prisma:generate",
+    "prestart": "npm run prisma:deploy"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.864.0",
-    "@aws-sdk/s3-request-presigner": "^3.864.0",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.1.0",
     "@fastify/helmet": "^13.0.1",

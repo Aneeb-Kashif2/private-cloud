@@ -16,8 +16,11 @@ const routes: FastifyPluginAsync = async app => {
     return response;
   });
   app.post("/recalculate", { preHandler: app.authenticate }, async request => {
-    const aggregate = await app.prisma.file.aggregate({ where: { userId: request.user.id }, _sum: { size: true } });
-    const user = await app.prisma.user.update({ where: { id: request.user.id }, data: { storageUsed: aggregate._sum.size ?? 0n }, select: { storageLimit: true, storageUsed: true } });
+    const user = await app.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${request.user.id} FOR UPDATE`;
+      const aggregate = await tx.file.aggregate({ where: { userId: request.user.id }, _sum: { size: true } });
+      return tx.user.update({ where: { id: request.user.id }, data: { storageUsed: aggregate._sum.size ?? 0n }, select: { storageLimit: true, storageUsed: true } });
+    });
     await invalidateUserMetadata(app, request.user.id);
     return jsonSafe(user);
   });
