@@ -4,6 +4,8 @@ Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cac
 
 For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions setup](deploy/README.md). Docker runs the application on this same Ubuntu server and bind-mounts the existing storage directory.
 
+For the inspected code paths, request flows and actual running infrastructure snapshot, see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
+
 ## Ubuntu setup
 
 Use Node.js 22+, npm, PostgreSQL and Redis installed directly on Ubuntu. No container or separate disk setup is needed.
