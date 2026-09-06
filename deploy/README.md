@@ -1,6 +1,6 @@
 # Docker and GitHub Actions deployment
 
-The Ubuntu laptop remains the server. Compose runs only the application containers, uses Linux host networking for the existing native PostgreSQL and Redis services, and bind-mounts `/srv/secure-cloud-storage` into the API at the identical path. No named Docker volumes or external file storage are used. File metadata remains in the existing PostgreSQL database.
+The Ubuntu laptop remains the server. Compose runs the application containers and Nginx, uses Linux host networking for the existing native PostgreSQL and Redis services, and bind-mounts `/srv/secure-cloud-storage` into the API at the identical path. No named Docker volumes or external file storage are used. File metadata remains in the existing PostgreSQL database.
 
 ## Run containers on Ubuntu
 
@@ -25,7 +25,7 @@ Stop your native frontend/backend dev or production processes before starting Co
 export APP_ENV_FILE=/etc/secure-cloud/backend.env
 export APP_UID=$(id -u)
 export APP_GID=$(id -g)
-export NEXT_PUBLIC_API_URL=https://cloud.example.com/api
+export NEXT_PUBLIC_API_URL=/api
 
 docker compose build
 docker compose up -d --wait --wait-timeout 120
@@ -41,7 +41,7 @@ Use an HTTPS reverse proxy on Ubuntu: `/api/` goes to `127.0.0.1:4000`, and othe
 
 The checked-in workflow is `.github/workflows/pipeline.yml`.
 
-1. In repository **Settings → Secrets and variables → Actions → Variables**, set `NEXT_PUBLIC_API_URL` to your browser-facing HTTPS API URL. Optionally set `APP_UID` and `APP_GID` to the storage owner's IDs (default 1000).
+1. In repository **Settings → Secrets and variables → Actions → Variables**, set `NEXT_PUBLIC_API_URL` to `/api` (also the workflow default). Optionally set `APP_UID` and `APP_GID` to the storage owner's IDs (default 1000).
 2. Allow Actions to use `GITHUB_TOKEN` for package publication. GHCR authentication uses that token automatically; no registry password is stored in the repository. If packages already exist, grant this repository Actions access to them.
 3. Push the changes to `main` or open a pull request. Pull requests run only on GitHub-hosted runners, with no publishing or deployment. Main builds publish two tested images: `ghcr.io/<owner>/<repo>-backend:<commit-sha>` and `ghcr.io/<owner>/<repo>-frontend:<commit-sha>`.
 4. For deployment, register a **trusted private-repository** self-hosted runner on the Ubuntu laptop with labels `self-hosted`, `Linux`, `X64`, and `secure-cloud`. Its account needs Docker access and read access to `/etc/secure-cloud/backend.env`. Keep the laptop awake and connected. Do not attach this production runner to a public/untrusted repository; use manual Compose deployment there instead.
@@ -79,3 +79,5 @@ bash scripts/smoke-containers.sh
 ```
 
 References: [Docker's GitHub Actions integration](https://docs.docker.com/build/ci/github-actions/), [Next.js standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output), and [GitHub runner security](https://docs.github.com/en/actions/reference/security/secure-use).
+
+Nginx is now included on port 8080. For the configured Cloudflare Quick Tunnel flow, use [Nginx and Cloudflare](NGINX_CLOUDFLARE.md).

@@ -6,6 +6,8 @@ For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions 
 
 For the inspected code paths, request flows and actual running infrastructure snapshot, see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
 
+For mobile access through Cloudflare, see [Nginx and Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md). The browser now uses same-origin `/api`; Nginx listens on port 8080.
+
 ## Ubuntu setup
 
 Use Node.js 22+, npm, PostgreSQL and Redis installed directly on Ubuntu. No container or separate disk setup is needed.
@@ -27,7 +29,7 @@ npm run prisma:deploy --workspace backend
 npm run dev
 ```
 
-Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=http://localhost:4000/api` for local development, or the API URL reachable from your client devices. Open port 3000 in the browser. In production, build with that URL configured, then run `npm start --workspace backend` and `npm start --workspace frontend` under your service manager. Use HTTPS with a reverse proxy; keep PostgreSQL and Redis private. The proxy must allow 5 GiB request bodies and sufficiently long streaming requests, with upload buffering disabled. Do not serve the storage directory as a static directory.
+Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=/api` for local development, so API requests use the same hostname as the page. Open port 3000 in the browser. In production, build with that URL configured, then run `npm start --workspace backend` and `npm start --workspace frontend` under your service manager. Use HTTPS with a reverse proxy; keep PostgreSQL and Redis private. The proxy must allow 5 GiB request bodies and sufficiently long streaming requests, with upload buffering disabled. Do not serve the storage directory as a static directory.
 
 ## Configuration
 
@@ -36,8 +38,8 @@ Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=http://localhost:4000/api` for
 | `DATABASE_URL` | PostgreSQL connection URL |
 | `REDIS_URL` | Redis connection URL |
 | `AUTH_SECRET` | At least 32 random characters |
-| `FRONTEND_ORIGIN` | Comma-separated allowed browser origins |
-| `NEXT_PUBLIC_API_URL` | Browser-accessible API URL ending in `/api` |
+| `FRONTEND_ORIGIN` | `*` for any HTTP(S) origin, or comma-separated allowed origins |
+| `NEXT_PUBLIC_API_URL` | `/api` for Nginx and mobile/tunnel access |
 | `PORT` | API port, default 4000 |
 | `STORAGE_PATH` | Absolute directory, default `/srv/secure-cloud-storage` |
 | `STORAGE_LIMIT_BYTES` | Required per-user quota: `5368709120` (5 GiB) |

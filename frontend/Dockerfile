@@ -7,7 +7,7 @@ COPY backend/package.json ./backend/package.json
 COPY frontend/package.json ./frontend/package.json
 RUN npm ci --workspace frontend
 COPY frontend ./frontend
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api
+ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN mkdir -p frontend/public && npm run build --workspace frontend
 

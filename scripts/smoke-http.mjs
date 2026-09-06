@@ -9,11 +9,16 @@ async function ready(url) {
   throw new Error(`Not ready: ${url}`);
 }
 await Promise.all([ready(`${api}/health`), ready(`${web}/login`)]);
+const origin = "https://smoke.trycloudflare.com";
+const preflight = await fetch(`${api}/api/files/upload`, { method: "OPTIONS", headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" } });
+assert.equal(preflight.status, 204);
+assert.equal(preflight.headers.get("access-control-allow-origin"), origin);
+assert.equal(preflight.headers.get("access-control-allow-credentials"), "true");
 let cookie;
 async function request(path, method = "GET", body, binary = false) {
   const response = await fetch(`${api}/api${path}`, {
     method,
-    headers: { origin: "http://localhost:3000", ...(cookie && { cookie }), ...(body !== undefined && { "content-type": binary ? "application/octet-stream" : "application/json" }) },
+    headers: { origin, "x-forwarded-proto": "https", ...(cookie && { cookie }), ...(body !== undefined && { "content-type": binary ? "application/octet-stream" : "application/json" }) },
     body: body === undefined ? undefined : binary ? body : JSON.stringify(body),
   });
   assert.ok(response.ok, `${method} ${path}: ${response.status} ${response.ok ? "" : await response.text()}`);
@@ -33,4 +38,4 @@ assert.equal(usage.storageLimit, "5368709120");
 assert.equal((await fetch(`${web}/files/${file.id}`)).status, 200);
 await request(`/files/${file.id}`, "DELETE");
 assert.equal((await (await request("/storage")).json()).storageUsed, "0");
-console.log("Container smoke tests passed: pages, auth, upload, list, download, quota, delete.");
+console.log("Nginx container smoke tests passed: CORS, pages, auth, upload, list, download, quota, delete.");

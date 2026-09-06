@@ -1,5 +1,7 @@
 # Secure-Cloud: current code flow and infrastructure
 
+**Later configuration update:** Nginx now routes port 8080 to the frontend and `/api`; the frontend defaults to `/api`, and wildcard credentialed CORS is supported. See [current proxy setup](deploy/NGINX_CLOUDFLARE.md). The runtime observations below remain the earlier snapshot.
+
 **Inspected:** 6 September 2026, approximately 10:45 PKT (05:45 UTC).
 
 This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The running-system observations are a point-in-time snapshot of the Ubuntu laptop. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.

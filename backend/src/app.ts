@@ -23,14 +23,23 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
   app.decorate("storage", overrides.storage ?? await createLocalStorage(config.STORAGE_PATH));
   app.decorate("redis", overrides.redis ?? createRedis(config));
   const allowedOrigins = new Set(config.FRONTEND_ORIGIN.split(",").map(origin => origin.trim()));
+  const allowOrigin = (origin: string | undefined) => {
+    if (!origin) return true;
+    // A credentialed response must echo an actual origin, never a literal *.
+    if (allowedOrigins.has("*")) {
+      try { const url = new URL(origin); return ["http:", "https:"].includes(url.protocol) && url.origin === origin; }
+      catch { return false; }
+    }
+    return allowedOrigins.has(origin);
+  };
   await app.register(helmet);
   await app.register(cookie, { secret: config.AUTH_SECRET });
-  await app.register(cors, { origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] });
+  await app.register(cors, { origin: (origin, callback) => callback(null, allowOrigin(origin)), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] });
   await app.register(rateLimit, { global: false, ...(app.redis.client && { redis: app.redis.client }) });
   app.addHook("onRequest", async request => {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.origin;
-      if (origin && !allowedOrigins.has(origin)) throw new AppError(403, "Request origin is not allowed", "INVALID_ORIGIN");
+      if (!allowOrigin(origin)) throw new AppError(403, "Request origin is not allowed", "INVALID_ORIGIN");
     }
   });
   app.setErrorHandler((error, _request, reply) => {
