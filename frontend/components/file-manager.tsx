@@ -3,7 +3,7 @@ import { Archive, ChevronLeft, ChevronRight, Download, File as FileIcon, FileTex
 import Link from "next/link";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, formatBytes, uploadToS3 } from "@/lib/api";
+import { api, API_URL, formatBytes, uploadFile } from "@/lib/api";
 
 type CloudFile={id:string;originalName:string;mimeType:string;size:string;createdAt:string;folder:{id:string;name:string}};
 type CloudFolder={id:string;name:string;parentId:string|null;isRoot:boolean};
@@ -15,8 +15,8 @@ export function FileManager({dashboard=false}:{dashboard?:boolean}){
  const loadFiles=useCallback(async()=>{if(!folderId)return;setLoading(true);try{const p=new URLSearchParams({folderId,search:query,type,sort,order:sort==="name"?"asc":"desc",page:String(page),limit:dashboard?"6":"30"});const r=await api<{files:CloudFile[];pagination:{pages:number}}>(`/files?${p}`);setFiles(r.files);setPages(r.pagination.pages||1)}finally{setLoading(false)}},[folderId,query,type,sort,page,dashboard]);
  useEffect(()=>{loadFolders().catch(e=>toast.error(e.message))},[loadFolders]); useEffect(()=>{loadFiles().catch(e=>toast.error(e.message))},[loadFiles]);
  useEffect(()=>{if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>{setQuery(search);setPage(1)},300);return()=>{if(timer.current)clearTimeout(timer.current)}},[search]);
- async function upload(list:FileList|File[]){if(!folderId)return;for(const file of Array.from(list)){const mime=file.type||"application/octet-stream";setUploading(v=>[...v,{name:file.name,progress:0}]);try{const r=await api<{uploadId:string;uploadUrl:string}>("/files/upload-url",{method:"POST",body:JSON.stringify({filename:file.name,size:file.size,mimeType:mime,folderId})});await uploadToS3(r.uploadUrl,file,p=>setUploading(v=>v.map(x=>x.name===file.name?{...x,progress:p}:x)));await api("/files/complete",{method:"POST",body:JSON.stringify({uploadId:r.uploadId})});toast.success(`${file.name} uploaded`)}catch(e){toast.error(e instanceof Error?e.message:"Upload failed")}finally{setUploading(v=>v.filter(x=>x.name!==file.name))}}loadFiles()}
- async function download(file:CloudFile){try{const r=await api<{url:string}>(`/files/${file.id}/download`);window.location.assign(r.url)}catch(e){toast.error(e instanceof Error?e.message:"Download failed")}}
+ async function upload(list:FileList|File[]){if(!folderId)return;for(const file of Array.from(list)){setUploading(v=>[...v,{name:file.name,progress:0}]);try{await uploadFile(folderId,file,p=>setUploading(v=>v.map(x=>x.name===file.name?{...x,progress:p}:x)));toast.success(`${file.name} uploaded`)}catch(e){toast.error(e instanceof Error?e.message:"Upload failed")}finally{setUploading(v=>v.filter(x=>x.name!==file.name))}}loadFiles()}
+ async function download(file:CloudFile){try{window.location.assign(`${API_URL}/files/${file.id}/download`)}catch(e){toast.error(e instanceof Error?e.message:"Download failed")}}
  async function remove(){if(!deleting)return;try{await api(`/files/${deleting.id}`,{method:"DELETE"});toast.success("File deleted");setDeleting(null);loadFiles()}catch(e){toast.error(e instanceof Error?e.message:"Delete failed")}}
  async function createFolder(e:React.FormEvent<HTMLFormElement>){e.preventDefault();const fd=new FormData(e.currentTarget);try{await api("/folders",{method:"POST",body:JSON.stringify({name:fd.get("name"),parentId:folderId})});setNewFolder(false);loadFolders();toast.success("Folder created")}catch(e){toast.error(e instanceof Error?e.message:"Could not create folder")}}
  function drop(e:DragEvent){e.preventDefault();setDrag(false);if(e.dataTransfer.files.length)upload(e.dataTransfer.files)}
