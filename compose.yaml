@@ -1,0 +1,67 @@
+name: secure-cloud
+
+# Linux host networking keeps the existing native PostgreSQL and Redis connections.
+services:
+  migrate:
+    image: ${BACKEND_IMAGE:-secure-cloud-backend:local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    network_mode: host
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    env_file: ${APP_ENV_FILE:-./backend/.env}
+    environment:
+      NODE_ENV: production
+    command: ["../node_modules/.bin/prisma", "migrate", "deploy"]
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  backend:
+    image: ${BACKEND_IMAGE:-secure-cloud-backend:local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    network_mode: host
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    env_file: ${APP_ENV_FILE:-./backend/.env}
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      STORAGE_PATH: /srv/secure-cloud-storage
+      STORAGE_LIMIT_BYTES: "5368709120"
+    volumes:
+      - type: bind
+        source: /srv/secure-cloud-storage
+        target: /srv/secure-cloud-storage
+        bind:
+          create_host_path: false
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 5m
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-secure-cloud-frontend:local}
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api}
+    network_mode: host
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

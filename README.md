@@ -2,6 +2,8 @@
 
 Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cache. The Ubuntu laptop running the API is the storage server. File bytes stream to and from `/srv/secure-cloud-storage`; PostgreSQL stores only metadata, authentication and quota counters.
 
+For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions setup](deploy/README.md). Docker runs the application on this same Ubuntu server and bind-mounts the existing storage directory.
+
 ## Ubuntu setup
 
 Use Node.js 22+, npm, PostgreSQL and Redis installed directly on Ubuntu. No container or separate disk setup is needed.
