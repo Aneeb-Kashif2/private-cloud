@@ -1,0 +1,68 @@
+logging {
+  level = "warn"
+  format = "json"
+}
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex = "secure-cloud"
+    action = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label = "service"
+  }
+  rule {
+    target_label = "job"
+    replacement = "secure-cloud-docker"
+  }
+}
+loki.source.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.containers.output
+  refresh_interval = "15s"
+  forward_to = [loki.process.privacy.receiver]
+}
+loki.process "privacy" {
+  // Unknown/free-form messages are classified, never forwarded verbatim. This
+  // prevents SQL, URLs, credentials and user content from leaking via exceptions.
+  stage.regex {
+    expression = "(?i)(?P<severity>error|fatal|panic|warn)"
+  }
+  stage.template {
+    source = "safe"
+    template = "{\"event\":\"container_log\",\"severity\":\"{{ if .severity }}warning_or_error{{ else }}info{{ end }}\",\"message\":\"Unstructured details omitted by privacy policy\"}"
+  }
+  stage.match {
+    selector = "{service=~\"backend|nginx\"}"
+    stage.json {
+      expressions = { event = "event", method = "method", route = "route", status = "status", duration = "duration_seconds" }
+    }
+    stage.template {
+      source = "safe"
+      template = "{{ if eq .event \"http_request\" }}{\"event\":\"http_request\",\"method\":{{ printf \"%q\" .method }},\"route\":{{ printf \"%q\" .route }},\"status\":{{ .status }},\"duration_seconds\":{{ .duration }}}{{ else }}{\"event\":\"container_log\",\"severity\":\"{{ if .severity }}warning_or_error{{ else }}info{{ end }}\",\"message\":\"Unstructured details omitted by privacy policy\"}{{ end }}"
+    }
+  }
+  stage.output { source = "safe" }
+  stage.label_keep { values = ["service", "job"] }
+  forward_to = [loki.write.local.receiver]
+}
+loki.write "local" {
+  endpoint { url = "http://127.0.0.1:3100/loki/api/v1/push" }
+}
+
+// The existing WhatsApp notification scripts run cloudflared on the Ubuntu host.
+// Read only its log; never ingest the URL/PID files or environment credentials.
+loki.source.file "native_cloudflared" {
+  targets = [{
+    __path__ = "/var/log/secure-cloud-tunnel/cloudflared.log",
+    service = "cloudflared",
+    job = "secure-cloud-native",
+  }]
+  forward_to = [loki.process.privacy.receiver]
+}

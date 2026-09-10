@@ -1,17 +1,29 @@
 name: secure-cloud
 
-# Linux host networking keeps the existing native PostgreSQL and Redis connections.
+include:
+  - path: ./monitoring/compose.yaml
+    project_directory: .
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 5m, max-file: '2'}
+
+# Linux host networking preserves existing localhost application connections.
 services:
   migrate:
     image: ${BACKEND_IMAGE:-secure-cloud-backend:local}
     build:
       context: .
       dockerfile: backend/Dockerfile
+    logging: *logging
     network_mode: host
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file: ${APP_ENV_FILE:-./backend/.env}
     environment:
       NODE_ENV: production
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
     command: ["../node_modules/.bin/prisma", "migrate", "deploy"]
     restart: "no"
     cap_drop: [ALL]
@@ -22,6 +34,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    logging: *logging
     network_mode: host
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file: ${APP_ENV_FILE:-./backend/.env}
@@ -52,6 +65,7 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+    logging: *logging
     network_mode: host
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     environment:
@@ -68,6 +82,7 @@ services:
 
   nginx:
     image: nginx:stable-alpine
+    logging: *logging
     network_mode: host
     volumes:
       - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro

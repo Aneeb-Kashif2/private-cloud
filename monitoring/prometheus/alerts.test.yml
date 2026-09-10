@@ -1,0 +1,13 @@
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="backend",instance="127.0.0.1:4001"}'
+        values: '0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels: {job: backend, instance: '127.0.0.1:4001', severity: warning}
+            exp_annotations: {summary: 'Monitoring target backend is unavailable'}

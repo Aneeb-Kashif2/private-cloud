@@ -1,10 +1,10 @@
 # Docker and GitHub Actions deployment
 
-The Ubuntu laptop remains the server. Compose runs the application containers and Nginx, uses Linux host networking to reach the existing PostgreSQL and Redis services through host ports, and bind-mounts `/srv/secure-cloud-storage` into the API at the identical path. Uploaded bytes use no named Docker volume or external file storage. The older PostgreSQL and Redis containers currently use their existing named volumes; this Compose file does not manage those containers or volumes. File metadata remains in the existing PostgreSQL database.
+The Ubuntu laptop remains the server. Compose runs the application containers and Nginx, uses Linux host networking to reach the existing PostgreSQL and Redis services through host ports, and bind-mounts `/srv/secure-cloud-storage` into the API at the identical path. Uploaded bytes use no named Docker volume or external file storage. The included monitoring Compose file now manages PostgreSQL and Redis, retaining their original external named volumes and publishing ports only on localhost. File metadata remains in the existing PostgreSQL database.
 
 ## Run containers on Ubuntu
 
-Install Docker Engine with the Compose v2+ plugin. The current deployment already has PostgreSQL and Redis in older containers exposing ports 5432 and 6379. Keep them running. On a fresh host, provision PostgreSQL and Redis separately and configure their connection URLs before starting this Compose stack. Back up the existing database and files before first deployment.
+Install Docker Engine with the Compose v2+ plugin. Follow [monitoring setup](../monitoring/README.md) to prepare credentials and adopt the original database containers before the first deployment of this version. The adoption preserves volumes and restricts ports 5432 and 6379 to localhost. A fresh host still requires database provisioning before running that existing-server setup. Back up the existing database and files before first deployment.
 
 ```bash
 # Use the UID/GID that already owns uploaded files. Do not recursively change existing ownership.
@@ -70,7 +70,7 @@ docker compose pull
 docker compose up -d --no-build --no-deps --wait backend frontend nginx
 ```
 
-This does not reverse schema migrations. Restore a coordinated database/files backup or use a forward fix when the earlier application is incompatible with the migrated schema. `docker compose down` removes application containers, leaving host PostgreSQL, Redis and uploaded files intact.
+This does not reverse schema migrations. Restore a coordinated database/files backup or use a forward fix when the earlier application is incompatible with the migrated schema. `docker compose down` now stops application, database and monitoring containers. External database volumes and the uploaded-files bind mount remain intact; omit `-v` to retain monitoring volumes too.
 
 Run the exact container checks locally without touching real application data:
 
@@ -83,3 +83,5 @@ bash scripts/smoke-containers.sh
 References: [Docker's GitHub Actions integration](https://docs.docker.com/build/ci/github-actions/), [Next.js standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output), and [GitHub runner security](https://docs.github.com/en/actions/reference/security/secure-use).
 
 Nginx is now included on port 8080. For the configured Cloudflare Quick Tunnel flow, use [Nginx and Cloudflare](NGINX_CLOUDFLARE.md).
+
+Monitoring and Grafana operations, required first-time credentials, and verification: [monitoring/README.md](../monitoring/README.md).

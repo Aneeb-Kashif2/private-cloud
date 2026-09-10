@@ -48,6 +48,8 @@ jobs:
       - run: npm run lint --workspace backend
       - run: npm test
       - run: npm run build
+      - name: Validate monitoring configuration
+        run: bash monitoring/scripts/validate.sh
 
   images:
     needs: checks
@@ -136,17 +138,21 @@ jobs:
           BACKEND_IMAGE: ${{ needs.images.outputs.backend }}
           FRONTEND_IMAGE: ${{ needs.images.outputs.frontend }}
           APP_ENV_FILE: /etc/secure-cloud/backend.env
+          MONITORING_RUNTIME_DIR: /etc/secure-cloud/monitoring
           APP_UID: ${{ vars.APP_UID || '1000' }}
           APP_GID: ${{ vars.APP_GID || '1000' }}
         run: |
           set -euo pipefail
           test -r "$APP_ENV_FILE"
+          test -r "$MONITORING_RUNTIME_DIR/postgres.env"
+          test -r "$MONITORING_RUNTIME_DIR/postgres-exporter.env"
+          test -r "$MONITORING_RUNTIME_DIR/grafana_admin_password"
           test -d /srv/secure-cloud-storage
           docker compose config --quiet
           docker compose pull
           # Stop writers before applying potentially incompatible migrations.
           docker compose stop nginx frontend backend
           docker compose run --rm --no-deps migrate
-          docker compose up -d --no-build --force-recreate --wait --wait-timeout 120
+          docker compose up -d --no-build --wait --wait-timeout 180
           echo "Deployed backend: $BACKEND_IMAGE" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployed frontend: $FRONTEND_IMAGE" >> "$GITHUB_STEP_SUMMARY"

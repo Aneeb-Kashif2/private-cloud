@@ -1,0 +1,60 @@
+import Fastify, { LogController } from "fastify";
+import { Writable } from "node:stream";
+import { afterEach, expect, it } from "vitest";
+import { instrument, startMetrics } from "../src/lib/observability.js";
+import type { FastifyInstance } from "fastify";
+const apps: FastifyInstance[] = [];
+afterEach(async () => { for (const app of apps.splice(0)) await app.close(); });
+function create() {
+  let logs = "";
+  const stream = new Writable({ write(chunk, _encoding, callback) { logs += chunk.toString(); callback(); } });
+  const app = Fastify({ logController: new LogController({ disableRequestLogging: true }), logger: { stream } });
+  app.decorate("metrics", instrument(app));
+  apps.push(app);
+  return { app, logs: () => logs };
+}
+it("records bounded routes, response codes, latency, transfers and authentication failures without sensitive request values", async () => {
+  const { app, logs } = create();
+  app.get("/api/files/:id/download", async () => "ok");
+  app.post("/api/files/upload", async (_req, reply) => reply.code(413).send());
+  app.post("/api/auth/login", async (_req, reply) => reply.code(401).send());
+  app.get("/broken", async (_req, reply) => reply.code(500).send());
+  const secret = "SECRET_MUST_NOT_APPEAR";
+  await app.inject({ url: `/api/files/${secret}/download?filename=${secret}`, headers: { authorization: secret, cookie: `session=${secret}` } });
+  await app.inject({ url: `/unknown-${secret}` });
+  await app.inject({ method: "POST", url: `/api/files/upload?filename=${secret}`, payload: secret });
+  await app.inject({ method: "POST", url: "/api/auth/login", payload: { password: secret } });
+  await app.inject("/broken");
+  const metrics = await app.metrics.metrics();
+  expect(metrics).toContain('route="/api/files/:id/download",status_code="200"');
+  expect(metrics).toContain('secure_cloud_downloads_total{outcome="success"} 1');
+  expect(metrics).toContain('secure_cloud_uploads_total{outcome="failure"} 1');
+  expect(metrics).toContain('secure_cloud_upload_failures_total 1');
+  expect(metrics).toContain('secure_cloud_authentication_failures_total 1');
+  expect(metrics).toContain('secure_cloud_http_errors_total{class="5xx"} 1');
+  expect(metrics).toContain('secure_cloud_http_request_duration_seconds_count');
+  expect(metrics).toContain('secure_cloud_process_resident_memory_bytes');
+  expect(metrics).not.toContain(secret);
+  expect(logs()).not.toContain(secret);
+  expect(logs()).toContain('"event":"http_request"');
+});
+it("keeps registries isolated between application instances", async () => {
+  const first = create().app, second = create().app;
+  first.get('/health', async () => ({ status: 'ok' }));
+  await first.inject('/health');
+  expect(await first.metrics.metrics()).toContain('status_code="200"');
+  expect(await second.metrics.metrics()).not.toContain('status_code="200"');
+});
+it("binds metrics only to loopback and tolerates unavailable metadata", async () => {
+  const { app } = create();
+  app.decorate('config', { STORAGE_PATH: '/nonexistent' } as FastifyInstance['config']);
+  app.decorate('prisma', { user: { aggregate: async () => { throw new Error('private database details'); } }, file: { count: async () => 0 } } as unknown as FastifyInstance['prisma']);
+  const server = await startMetrics(app, 0);
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing listener');
+  expect(address.address).toBe('127.0.0.1');
+  const response = await fetch(`http://127.0.0.1:${address.port}/metrics`);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain('secure_cloud_storage_collection_success 0');
+  expect((await app.inject('/metrics')).statusCode).toBe(404);
+});

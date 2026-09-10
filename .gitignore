@@ -50,3 +50,9 @@ Thumbs.db
 *.crt
 
 !deploy/backend.env.example
+
+# Locally generated monitoring credentials; never commit.
+monitoring/runtime/
+
+# Quick Tunnel runtime state and logs; never commit.
+.runtime/

@@ -84,3 +84,11 @@ The preflight should return 204, echo the example origin and allow credentials. 
 A Cloudflare 413 response for a large file is **not a CORS problem**. Cloudflare imposes its own plan/zone request-body limits; Nginx's 5 GiB limit and the application's quota cannot override them. This app sends each file in a single HTTP request and does not currently split uploads into resumable chunks.
 
 References: [credentialed CORS rules](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS), [Cloudflare Quick Tunnels](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/), [Cloudflare upload limits](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/), [Nginx proxy module](https://nginx.org/en/docs/http/ngx_http_proxy_module.html).
+
+## Monitoring route
+
+Nginx also proxies `/grafana/` to loopback port 3002. Grafana requires its own
+login. The private status listener is 127.0.0.1:8082; metrics are not publicly
+proxied. See [monitoring setup](../monitoring/README.md) for the managed optional
+cloudflared container, log collection, and `GRAFANA_ROOT_URL` when the tunnel
+hostname changes. Continue pointing the tunnel to Nginx port 8080.

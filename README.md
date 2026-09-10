@@ -1,5 +1,7 @@
 # Secure-Cloud
 
+Current monitoring and infrastructure: [monitoring/README.md](monitoring/README.md). Compose now includes Prometheus, Grafana, Loki, Alloy, host/container/service exporters and the existing databases (preserving their volumes). Grafana is served at `/grafana/`; monitoring and database ports bind only to localhost. Complete the documented one-time setup before starting this version.
+
 Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cache. The Ubuntu laptop running the API is the storage server. File bytes stream to and from `/srv/secure-cloud-storage`; PostgreSQL stores only metadata, authentication and quota counters.
 
 For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions setup](deploy/README.md). Docker runs the application on this same Ubuntu server and bind-mounts the existing storage directory.
@@ -18,11 +20,11 @@ Verified on **6 September 2026 at approximately 20:23 PKT**: Nginx, frontend and
 | Next.js | `secure-cloud-frontend-1` | 3000: production standalone frontend |
 | Fastify | `secure-cloud-backend-1` | 4000: production API |
 | Migrations | `secure-cloud-migrate-1` | One-shot Prisma job, exit 0 |
-| PostgreSQL | `self-cloud-prj-postgres-1` | Host port 5432; existing named database volume |
-| Redis | `self-cloud-prj-redis-1` | Host port 6379; existing named cache volume |
+| PostgreSQL | `self-cloud-prj-postgres-1` | Localhost-only port 5432; existing named database volume |
+| Redis | `self-cloud-prj-redis-1` | Localhost-only port 6379; existing named cache volume |
 | Uploaded files | Ubuntu filesystem bind-mounted into backend | `/srv/secure-cloud-storage` |
 
-The current Compose project manages the app and proxy; it relies on the older database containers through host-published ports. It does not create those database services on a fresh machine. Keep them running and retain their volumes.
+The current Compose project manages the app, proxy, databases and monitoring. Complete the one-time [monitoring setup](monitoring/README.md) to adopt the original database containers and preserve their volumes.
 
 ```bash
 # From the repository root; uses backend/.env by default.
@@ -33,9 +35,9 @@ docker compose up -d --build --wait --wait-timeout 120
 cloudflared tunnel --url http://localhost:8080
 ```
 
-Open the generated HTTPS URL on your phone and sign in. The browser uses `/api`, so it never tries to reach `localhost:4000` on the phone. `FRONTEND_ORIGIN=*` accepts valid HTTP(S) origins using credential-compatible origin reflection. Nginx routes `/api/*` to Fastify and other requests to Next.js. The tunnel is separate from Compose and its temporary hostname changes across runs.
+Open the generated HTTPS URL on your phone and sign in. The browser uses `/api`, so it never tries to reach `localhost:4000` on the phone. `FRONTEND_ORIGIN=*` accepts valid HTTP(S) origins using credential-compatible origin reflection. Nginx routes `/api/*` to Fastify and other requests to Next.js. The native tunnel command is outside Compose; the optional `tunnel` profile provides a managed equivalent with centralized logs. Its temporary hostname changes across runs.
 
-Do not also start `npm run dev` while the app containers own ports 3000/4000. To use development mode instead, stop the application stack with `docker compose down`, keep the older PostgreSQL/Redis containers running, install workspace dependencies, and run:
+Do not also start `npm run dev` while the app containers own ports 3000/4000. To use development mode instead, stop the application containers with `docker compose stop nginx frontend backend`, keep the Compose PostgreSQL/Redis services running, install workspace dependencies, and run:
 
 ```bash
 npm ci
@@ -88,7 +90,7 @@ npm test
 npm run build
 ```
 
-The suite contains 32 tests, including filesystem/config, CORS and database integration coverage. Filesystem and CORS tests run without a live database. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
+The suite contains 35 tests, including filesystem/config, CORS, observability and database integration coverage. Filesystem and CORS tests run without a live database. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
 
 ```bash
 DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:deploy --workspace backend
@@ -98,3 +100,5 @@ npm test
 Integration coverage includes authentication, ownership, upload/download bytes, quota concurrency, failed-upload cleanup and permanent-delete accounting.
 
 Development uses `frontend/.next-dev`; production builds use `frontend/.next`. Keeping these separate prevents missing vendor chunks when building while the dev server runs.
+
+Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.

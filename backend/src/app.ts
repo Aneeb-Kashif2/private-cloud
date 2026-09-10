@@ -1,9 +1,10 @@
+import { instrument } from "./lib/observability.js";
 import { PrismaClient } from "@prisma/client";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import { ZodError } from "zod";
 import { loadConfig, type Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
@@ -17,11 +18,25 @@ import authPlugin from "./plugins/auth.js";
 
 export async function buildApp(overrides: { config?: Config; prisma?: PrismaClient; storage?: LocalStorage; redis?: RedisService } = {}) {
   const config = overrides.config ?? loadConfig();
-  const app = Fastify({ logger: { level: config.NODE_ENV === "test" ? "silent" : "info", redact: ["req.headers.authorization", "req.headers.cookie", "body.password", "body.confirmPassword"] }, trustProxy: config.NODE_ENV === "production" });
+  const app = Fastify({
+    logController: new LogController({ disableRequestLogging: true }),
+    logger: {
+      level: config.NODE_ENV === "test" ? "silent" : "info",
+      // Also protect framework error logs that attach request/response objects.
+      serializers: {
+        req: () => ({}),
+        res: reply => ({ statusCode: reply.statusCode }),
+        err: () => ({ type: "Error", message: "Internal error; sensitive details omitted", stack: "" }),
+      },
+      redact: ["req.headers.authorization", "req.headers.cookie", "body.password", "body.confirmPassword"],
+    },
+    trustProxy: config.NODE_ENV === "production",
+  });
   app.decorate("config", config);
   app.decorate("prisma", overrides.prisma ?? new PrismaClient());
   app.decorate("storage", overrides.storage ?? await createLocalStorage(config.STORAGE_PATH));
   app.decorate("redis", overrides.redis ?? createRedis(config));
+  app.decorate("metrics", instrument(app));
   const allowedOrigins = new Set(config.FRONTEND_ORIGIN.split(",").map(origin => origin.trim()));
   const allowOrigin = (origin: string | undefined) => {
     if (!origin) return true;
@@ -46,7 +61,7 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
     if (error instanceof ZodError) return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Invalid request", details: error.issues.map(i => ({ path: i.path.join("."), message: i.message })) } });
     if (error instanceof AppError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
     if ((error as { code?: string }).code === "P2002") return reply.code(409).send({ error: { code: "CONFLICT", message: "A record with that name already exists" } });
-    app.log.error(error);
+    app.log.error({ event: "request_error", err: error }, "Request failed");
     return reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" } });
   });
   await app.register(authPlugin);

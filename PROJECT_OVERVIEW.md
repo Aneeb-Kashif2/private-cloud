@@ -1,8 +1,10 @@
 # Secure-Cloud project overview
 
+Current monitoring and infrastructure: [monitoring/README.md](monitoring/README.md). Compose now includes Prometheus, Grafana, Loki, Alloy, host/container/service exporters and the existing databases (preserving their volumes). Grafana is served at `/grafana/`; monitoring and database ports bind only to localhost. Complete the documented one-time setup before starting this version.
+
 Updated from the running laptop on **6 September 2026, 20:23 PKT**.
 
-Secure-Cloud runs on one Ubuntu laptop. Nginx, the Next.js frontend and the Fastify backend are healthy Docker containers in the `secure-cloud` Compose project. Its Prisma migration job completed with exit code 0. PostgreSQL and Redis run in older `self-cloud-prj` Docker containers and retain their existing named volumes.
+Secure-Cloud runs on one Ubuntu laptop. Nginx, the Next.js frontend and the Fastify backend are healthy Docker containers in the `secure-cloud` Compose project. Its Prisma migration job completed with exit code 0. PostgreSQL and Redis are now managed by the included monitoring Compose file, retain their original container names and external named volumes, and publish ports only on localhost.
 
 ```mermaid
 flowchart LR
@@ -36,3 +38,5 @@ Local verification returned HTTP 200 for Nginx `/login`, HTTP 401 for unauthenti
 - [Operating commands and configuration](README.md)
 - [Docker and GitHub Actions deployment](deploy/README.md)
 - [Nginx and mobile/Cloudflare access](deploy/NGINX_CLOUDFLARE.md)
+
+Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.

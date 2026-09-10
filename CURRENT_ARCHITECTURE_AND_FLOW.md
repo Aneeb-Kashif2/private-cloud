@@ -33,13 +33,13 @@ The browser uses the relative API base `/api`, so mobile requests stay on the sa
 | Backend | `secure-cloud-backend-1`, `secure-cloud-backend:local`, healthy | Compiled Fastify API on port 4000, `NODE_ENV=production` |
 | Frontend | `secure-cloud-frontend-1`, `secure-cloud-frontend:local`, healthy | Standalone production Next.js on port 3000 |
 | Migrations | `secure-cloud-migrate-1`, exited with code 0 | One-shot Prisma migration job; successful exit is expected |
-| PostgreSQL | `self-cloud-prj-postgres-1`, `postgres:17-alpine`, healthy | Existing database service published on host port 5432 |
-| Redis | `self-cloud-prj-redis-1`, `redis:7.4-alpine`, healthy | Existing cache service published on host port 6379 |
+| PostgreSQL | `self-cloud-prj-postgres-1`, `postgres:17-alpine`, healthy | Compose-managed database, published only on 127.0.0.1:5432 |
+| Redis | `self-cloud-prj-redis-1`, `redis:7.4-alpine`, healthy | Compose-managed cache, published only on 127.0.0.1:6379 |
 | Upload directory | `/srv/secure-cloud-storage`, owner `aneeb-kashif:aneeb-kashif`, mode `0755` | File bytes stored on Ubuntu and bind-mounted into the backend |
 | Cloudflare connector | No running `cloudflared` process observed | Quick Tunnel must be started separately for public/mobile access |
 | GitHub Actions / GHCR | Workflow exists locally | Remote runs, published images, runner registration and environment settings were not verified |
 
-There are two service groups: the current `secure-cloud` Compose project manages Nginx, frontend, backend and migrations; the older `self-cloud-prj` containers provide PostgreSQL and Redis. The current Compose file does not recreate or manage those older database containers.
+The `secure-cloud` Compose project now manages the application, PostgreSQL, Redis and monitoring through the included `monitoring/compose.yaml`. The original database volumes are preserved; database ports bind only to localhost. See [monitoring operations](monitoring/README.md) for adoption and recovery.
 
 The **existing database containers use named Docker volumes**:
 
@@ -50,7 +50,7 @@ The **existing database containers use named Docker volumes**:
 
 These volumes hold database/cache data, not uploaded-file bytes. Uploaded files use the separate host bind mount. The current Compose file declares no named volumes of its own.
 
-All four current Compose services use Linux host networking. They reach the older database containers through their published localhost ports. Blank port mappings in `docker compose ps` for the application containers are therefore expected.
+Application and monitoring services use Linux host networking. PostgreSQL and Redis use a bridge network with published localhost-only ports. Blank port mappings in `docker compose ps` for the application containers are therefore expected.
 
 The running backend environment was checked selectively: `NODE_ENV=production`, `FRONTEND_ORIGIN=*`, `STORAGE_PATH=/srv/secure-cloud-storage`, and `STORAGE_LIMIT_BYTES=5368709120`. Compose overrides development defaults from `backend/.env`. The normal local Compose environment source is `backend/.env`; the optional GitHub deployment job instead expects `/etc/secure-cloud/backend.env` through `APP_ENV_FILE`.
 
@@ -309,7 +309,7 @@ flowchart LR
     A --> R[Existing Redis via host :6379]
 ```
 
-All four use Linux host networking. No new PostgreSQL or Redis services are declared, and no named volumes are declared in this new Compose file. Application ports remain 3000/4000; Nginx is the browser/tunnel entry point on 8080. Existing host-published database services, including the older containers observed above, remain reachable.
+Application and monitoring services use Linux host networking; PostgreSQL/Redis are bridge-network services published only on localhost. The included monitoring Compose file preserves their original external named volumes and adds persistent monitoring volumes. Application ports remain 3000/4000; Nginx remains the browser/tunnel entry point on 8080.
 
 The backend image builds TypeScript and Prisma, removes development dependencies, and retains the Prisma CLI because the migration service needs it. Its default command runs compiled JavaScript directly; Compose handles migrations separately. The frontend image copies Next.js standalone output, static assets and public assets into its runtime stage. `NEXT_PUBLIC_API_URL` is a frontend build argument, not a runtime-switchable browser setting.
 
@@ -351,7 +351,7 @@ These findings describe the inspected code; this documentation task did not modi
 | Settings text mentions signed links and bucket credentials | Downloads are authenticated local filesystem streams |
 | UI labels include “ENCRYPTED NODE”, “TLS 1.3” and “ALL SYSTEMS NOMINAL” | These are static labels; this code does not implement file encryption at rest, negotiate TLS itself or derive those labels from health checks. Host disk encryption was not inspected |
 | UI mount text says `/users/current/files` | Actual files live directly under `/srv/secure-cloud-storage/<uuid>` |
-| Two Compose generations coexist | The current application project relies on database containers from the older project; its Compose file cannot rebuild those database services |
+| Existing database volumes retained | One-time adoption moves the original databases into the current Compose project without replacing data; stopped legacy containers must not run concurrently |
 | Storage directory is `0755` | The adapter requests `0700` only when creating a directory; it does not change permissions on an existing one. New files are opened with `0600` |
 | Storage summary says “LIVE” | It fetches once on mount, with no polling or upload/delete refresh subscription; the display may remain stale until remounted |
 | Session snapshot contains usage values | Cached `/auth/me` data can lag; quota admission uses current SQL counters instead |
@@ -365,10 +365,23 @@ The API also trusts the client-declared MIME classification for filtering; it va
 
 ## 13. Tests and verification scope
 
-There are **32 tests: 12 filesystem/config tests, four CORS tests and 16 database integration tests**. The CORS tests cover changing tunnel origins, credentialed preflights, explicit allowlists, invalid origins and continued authentication enforcement. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
+There are **35 tests: 12 filesystem/config tests, four CORS tests, three observability tests and 16 database integration tests**. The CORS tests cover changing tunnel origins, credentialed preflights, explicit allowlists, invalid origins and continued authentication enforcement. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
 
 The smoke script builds an isolated Docker network, starts disposable PostgreSQL/Redis plus the application and Nginx containers, mounts a temporary upload directory, applies migrations, exercises credentialed CORS preflights and HTTP registration/upload/list/download/quota/delete and page responses through Nginx, and checks graceful backend shutdown. Its cleanup removes the temporary containers/network/directory. It does not operate on the live uploaded-file directory.
 
 Earlier implementation validation in this session passed all 32 tests, type-check, backend lint, both Docker builds and container smoke tests. This inspection performed fresh read-only runtime/configuration/proxy checks; it did not rerun the test suite or deploy anything. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
 
 For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). The runtime snapshot in section 2 is the current observation; the Compose section describes the active local stack, while the CI section describes automation whose remote execution was not verified.
+
+## Monitoring extension
+
+See [monitoring/README.md](monitoring/README.md) for the current full topology,
+ports, setup, dashboards, log privacy policy, retention, and verification.
+Fastify publishes metrics on a separate localhost:4001 socket; its request hooks
+observe outcomes without changing authentication or storage. Aggregate storage
+metrics are read every 60 seconds. Nginx serves Grafana at `/grafana/` and exposes
+stub status only on localhost:8082. Alloy sends privacy-filtered Compose logs to
+Loki. Prometheus scrapes host/container/application/exporter metrics every 30s.
+Seven dashboards and both data sources are provisioned from Git.
+
+Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.
