@@ -8,6 +8,10 @@ cloudflared tunnel --url http://localhost:8080
 
 Keep that command running and open the generated `https://...trycloudflare.com` URL on your phone. No router port forwarding or local TLS certificate is needed for this tunnel. The temporary hostname changes when a new Quick Tunnel is created.
 
+## Verified current status
+
+At approximately **20:23 PKT on 6 September 2026**, Nginx, frontend and backend containers were healthy; the Prisma migration job exited with code 0. Existing PostgreSQL/Redis containers were healthy. Nginx returned 200 for `/login`, 401 for unauthenticated `/api/files`, and API health reported Redis `ready`. No running `cloudflared` process was observed, so the tunnel must be started separately. Public HTTPS/mobile access was not tested in this documentation update.
+
 ## Request flow
 
 ```text

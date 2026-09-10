@@ -1,8 +1,6 @@
 # Secure-Cloud: current code flow and infrastructure
 
-**Later configuration update:** Nginx now routes port 8080 to the frontend and `/api`; the frontend defaults to `/api`, and wildcard credentialed CORS is supported. See [current proxy setup](deploy/NGINX_CLOUDFLARE.md). The runtime observations below remain the earlier snapshot.
-
-**Inspected:** 6 September 2026, approximately 10:45 PKT (05:45 UTC).
+**Verified runtime snapshot:** 6 September 2026, approximately 20:23 PKT (15:23 UTC).
 
 This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The running-system observations are a point-in-time snapshot of the Ubuntu laptop. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.
 
@@ -14,28 +12,34 @@ The enforced quota is **5 GiB per user**, exactly `5368709120` bytes. Uploads an
 
 ```mermaid
 flowchart LR
-    Browser[Browser] -->|Pages and JavaScript| Next[Next.js frontend :3000]
-    Browser -->|Cookies, JSON and file streams| API[Fastify API :4000]
-    API -->|Prisma and SQL| PG[(PostgreSQL :5432)]
-    API -->|Session and metadata cache| Redis[(Redis :6379)]
-    API -->|Read and write bytes| Disk[Ubuntu filesystem: /srv/secure-cloud-storage]
+    Browser[Browser or phone] -->|HTTPS when tunnel is running| CF[Cloudflare Quick Tunnel]
+    CF --> Tunnel[cloudflared on Ubuntu]
+    Tunnel --> Nginx[Nginx container :8080]
+    Nginx -->|Pages and assets| Next[Next.js container :3000]
+    Nginx -->|/api requests and streams| API[Fastify container :4000]
+    API -->|Prisma and SQL| PG[(Existing PostgreSQL container :5432)]
+    API -->|Sessions and metadata cache| Redis[(Existing Redis container :6379)]
+    API -->|Bind-mounted file bytes| Disk[Ubuntu filesystem: /srv/secure-cloud-storage]
 ```
 
-Next.js is not a second API layer here: browser code normally calls Fastify directly using `NEXT_PUBLIC_API_URL`. A production reverse proxy can expose both under one HTTPS origin.
+The browser uses the relative API base `/api`, so mobile requests stay on the same public hostname as the page. Nginx sends `/api/*` to Fastify and other paths to Next.js. Next.js also supplies an `/api/*` rewrite to the local backend for direct development access. No business logic has moved out of Fastify.
 
 ## 2. Infrastructure actually running at inspection time
 
-| Component | Observed state | Persistence / purpose |
+| Component | Verified state | Persistence / purpose |
 | --- | --- | --- |
-| Ubuntu laptop | Application host and file-storage host | Single-machine deployment |
-| Backend | A host Node process, launched through `tsx`, listening on `0.0.0.0:4000`; working directory is `backend/` | Running development API, not an application container |
-| Frontend | No listener on port 3000; `/login` connection failed | Frontend was not running on its configured default port at this snapshot |
-| PostgreSQL | Healthy existing container `self-cloud-prj-postgres-1`, image `postgres:17-alpine` | Published host port 5432; database configured as `selfcloud` |
-| Redis | Healthy existing container `self-cloud-prj-redis-1`, image `redis:7.4-alpine` | Published host port 6379 |
-| Upload directory | `/srv/secure-cloud-storage` exists; owned by `aneeb-kashif:aneeb-kashif`; directory mode `0755` | Actual file content, outside the database |
-| New Compose app services | No running `secure-cloud` backend/frontend containers were observed | New deployment configuration exists but is not the observed running app |
-| Production environment file | `/etc/secure-cloud/backend.env` was not available during inspection | Required by the manual deployment job |
-| GitHub deployment | Workflow exists in the repository | Remote runs, published packages, runner registration and environment settings were not verified |
+| Ubuntu laptop | Host for all application services and uploaded files | Single-machine deployment |
+| Nginx | `secure-cloud-nginx-1`, `nginx:stable-alpine`, healthy | Entry point on port 8080; configuration bind-mounted read-only |
+| Backend | `secure-cloud-backend-1`, `secure-cloud-backend:local`, healthy | Compiled Fastify API on port 4000, `NODE_ENV=production` |
+| Frontend | `secure-cloud-frontend-1`, `secure-cloud-frontend:local`, healthy | Standalone production Next.js on port 3000 |
+| Migrations | `secure-cloud-migrate-1`, exited with code 0 | One-shot Prisma migration job; successful exit is expected |
+| PostgreSQL | `self-cloud-prj-postgres-1`, `postgres:17-alpine`, healthy | Existing database service published on host port 5432 |
+| Redis | `self-cloud-prj-redis-1`, `redis:7.4-alpine`, healthy | Existing cache service published on host port 6379 |
+| Upload directory | `/srv/secure-cloud-storage`, owner `aneeb-kashif:aneeb-kashif`, mode `0755` | File bytes stored on Ubuntu and bind-mounted into the backend |
+| Cloudflare connector | No running `cloudflared` process observed | Quick Tunnel must be started separately for public/mobile access |
+| GitHub Actions / GHCR | Workflow exists locally | Remote runs, published images, runner registration and environment settings were not verified |
+
+There are two service groups: the current `secure-cloud` Compose project manages Nginx, frontend, backend and migrations; the older `self-cloud-prj` containers provide PostgreSQL and Redis. The current Compose file does not recreate or manage those older database containers.
 
 The **existing database containers use named Docker volumes**:
 
@@ -44,13 +48,24 @@ The **existing database containers use named Docker volumes**:
 | `self-cloud-prj_postgres_data` | `/var/lib/postgresql/data` | `/var/lib/docker/volumes/self-cloud-prj_postgres_data/_data` |
 | `self-cloud-prj_redis_data` | `/data` | `/var/lib/docker/volumes/self-cloud-prj_redis_data/_data` |
 
-These are database/cache volumes, not the uploaded-file directory. This is an important distinction from the documentation describing native PostgreSQL/Redis services: those services are currently supplied by older Docker containers through host-published ports. The new Compose file does not create or manage them.
+These volumes hold database/cache data, not uploaded-file bytes. Uploaded files use the separate host bind mount. The current Compose file declares no named volumes of its own.
 
-The inspected root and backend environment files point to PostgreSQL at `localhost:5432`, Redis at `localhost:6379`, local storage at `/srv/secure-cloud-storage`, and development mode. Allowed frontend origins include localhost ports 3000 and 3001. No `frontend/.env.local` was available; the browser API helper has a fallback of `http://localhost:4000/api`.
+All four current Compose services use Linux host networking. They reach the older database containers through their published localhost ports. Blank port mappings in `docker compose ps` for the application containers are therefore expected.
 
-Database checks confirmed all three migrations are applied, including `20260905000000_local_storage`, and the current `File` table has `storageKey`. The earlier missing-column problem is not present in the inspected schema.
+The running backend environment was checked selectively: `NODE_ENV=production`, `FRONTEND_ORIGIN=*`, `STORAGE_PATH=/srv/secure-cloud-storage`, and `STORAGE_LIMIT_BYTES=5368709120`. Compose overrides development defaults from `backend/.env`. The normal local Compose environment source is `backend/.env`; the optional GitHub deployment job instead expects `/etc/secure-cloud/backend.env` through `APP_ENV_FILE`.
 
-`GET /health` returned `{"status":"ok","redis":"wait"}`. Redis uses lazy connection initialization, so `wait` describes the client state; it does not by itself mean the Redis container is down. This endpoint does not query PostgreSQL or ping Redis and should be understood as a basic API liveness response.
+Fresh checks through Nginx returned:
+
+| Check | Result |
+| --- | --- |
+| `GET http://127.0.0.1:8080/login` | HTTP 200 |
+| `GET http://127.0.0.1:8080/api/files` without a cookie | HTTP 401, as expected for protected data |
+| `GET http://127.0.0.1:8080/health` | `{"status":"ok","redis":"ready"}` |
+| Migration container status | `Exited (0)` |
+
+The local-storage migration was confirmed applied during the earlier schema inspection; the current migration job also completed successfully. The health route reports API liveness and Redis client state, but does not execute a database query or disk check on every request.
+
+To make the current local stack available through the user's Quick Tunnel setup, run `cloudflared tunnel --url http://localhost:8080` and keep it running. Use its generated HTTPS URL on the phone. A local healthy stack does not by itself establish that a public tunnel is active.
 
 ## 3. Where the code lives
 
@@ -83,7 +98,11 @@ Database checks confirmed all three migrations are applied, including `202609050
 
 ## 4. Startup and request handling
 
-### Development startup
+### Current Docker startup
+
+The active stack was started with Compose. The migration container runs first and exits successfully; the backend then starts, the frontend waits for backend health, and Nginx waits for both application containers. Container commands run compiled backend JavaScript and the standalone Next.js server. `npm run dev` is an alternative development mode, not how the current containers run. Do not run it concurrently on the same ports.
+
+### Alternative development startup
 
 `npm run dev` at the root starts the backend and frontend workspace development commands in parallel using the shell. The backend's `predev` first runs `prisma migrate deploy` and `prisma generate`; then `tsx watch src/server.ts` starts it. The frontend runs `next dev`.
 
@@ -95,11 +114,11 @@ The backend startup sequence is:
 2. Create Prisma, the local-storage adapter and the Redis client.
 3. Create/check the storage directory and reject a root path that resolves through symlinks.
 4. Register Helmet, cookies, credentialed CORS and rate-limit support.
-5. Reject supplied, disallowed `Origin` headers on state-changing requests.
+5. Apply the configured origin policy to CORS and state-changing requests. With `FRONTEND_ORIGIN=*`, valid HTTP(S) origins are accepted and reflected for credentialed CORS; explicit origin lists still restrict access.
 6. Register the error handler before authentication and route plugins.
 7. Listen on port 4000 by default.
 
-Zod failures produce structured 400 responses, known `AppError` instances retain their intended status, uniqueness conflicts become 409, and unexpected errors are logged with a generic 500 response to the browser. The origin check only rejects an origin when one is supplied; it is not a blanket requirement for every client to send that header.
+Zod failures produce structured 400 responses, known `AppError` instances retain their intended status, uniqueness conflicts become 409, and unexpected errors are logged with a generic 500 response to the browser. Requests without an Origin remain supported. Wildcard mode rejects invalid/opaque origins and does not send a literal wildcard response with credentials. Fastify sends the actual allowed origin with credentials and `Vary: Origin`; Nginx does not add duplicate CORS headers.
 
 On SIGTERM/SIGINT the API closes Fastify and its owned Prisma/Redis connections. Compose grants the backend five minutes before forced shutdown.
 
@@ -276,25 +295,27 @@ All routes below require a session except register, login and health.
 
 ## 10. Docker configuration available in the repository
 
-[compose.yaml](compose.yaml) defines three services in project `secure-cloud`:
+[compose.yaml](compose.yaml) defines four services in the running project `secure-cloud`:
 
 ```mermaid
 flowchart LR
     M[Migration container] -->|Must complete successfully| A[Backend container]
     A -->|Must become healthy| F[Frontend container]
+    F -->|Must become healthy| N[Nginx container :8080]
+    A -->|Must become healthy| N
     A -->|Bind mount, same path| D["/srv/secure-cloud-storage on Ubuntu"]
     M --> P[Existing PostgreSQL via host :5432]
     A --> P
     A --> R[Existing Redis via host :6379]
 ```
 
-All three use Linux host networking. No new PostgreSQL or Redis services are declared, and no named volumes are declared in this new Compose file. Application ports remain 3000/4000. Existing host-published database services, including the older containers observed above, remain reachable.
+All four use Linux host networking. No new PostgreSQL or Redis services are declared, and no named volumes are declared in this new Compose file. Application ports remain 3000/4000; Nginx is the browser/tunnel entry point on 8080. Existing host-published database services, including the older containers observed above, remain reachable.
 
 The backend image builds TypeScript and Prisma, removes development dependencies, and retains the Prisma CLI because the migration service needs it. Its default command runs compiled JavaScript directly; Compose handles migrations separately. The frontend image copies Next.js standalone output, static assets and public assets into its runtime stage. `NEXT_PUBLIC_API_URL` is a frontend build argument, not a runtime-switchable browser setting.
 
-Both images default to the non-root `node` user. Compose allows `APP_UID`/`APP_GID` overrides to match the upload directory owner, drops capabilities and prevents privilege escalation. The upload directory is a bind mount at the same path and must already exist on the host. Environment values come from `APP_ENV_FILE` (default `backend/.env`); the deployment job explicitly uses `/etc/secure-cloud/backend.env`.
+Both application images default to the non-root `node` user. The separate Nginx service uses the official Nginx image and its default user configuration. For backend/frontend, Compose allows `APP_UID`/`APP_GID` overrides to match the upload directory owner, drops capabilities and prevents privilege escalation. The upload directory is a bind mount at the same path and must already exist on the host. Environment values come from `APP_ENV_FILE` (default `backend/.env`); the deployment job explicitly uses `/etc/secure-cloud/backend.env`.
 
-Production HTTPS/reverse-proxy setup is described in [deployment instructions](deploy/README.md), but no reverse-proxy container or TLS certificate provisioning is defined here. The local listening-port snapshot did not show ports 80 or 443.
+Nginx is included and running with [deploy/nginx/default.conf](deploy/nginx/default.conf). It preserves the `/api` prefix, forwards host/protocol information, supports WebSocket upgrades, disables API caching and buffering, and allows bodies up to 5 GiB. The configured Quick Tunnel terminates public HTTPS at Cloudflare and forwards to local Nginx over HTTP; local TLS certificate provisioning is not part of this setup. See [Nginx and Cloudflare](deploy/NGINX_CLOUDFLARE.md). Cloudflare request limits can still reject a large upload before it reaches Nginx; this app does not implement resumable/chunked uploads.
 
 ## 11. GitHub Actions flow
 
@@ -314,7 +335,7 @@ flowchart TD
     Stop --> Start[Recreate app and wait for health]
 ```
 
-The `checks` and `images` jobs use GitHub-hosted runners. Integration tests receive an explicit disposable PostgreSQL database. Images are smoke-tested before publication. Publication requires the repository variable `NEXT_PUBLIC_API_URL`, uses `GITHUB_TOKEN`, and creates `ghcr.io/<owner>/<repo>-backend:<commit>` and the matching frontend image. Deployment uses recorded registry digests.
+The `checks` and `images` jobs use GitHub-hosted runners. Integration tests receive an explicit disposable PostgreSQL database. Images are smoke-tested before publication. Frontend builds default to `/api`; `NEXT_PUBLIC_API_URL` is an optional override and should not point to localhost for mobile use. Publication uses `GITHUB_TOKEN`, and creates `ghcr.io/<owner>/<repo>-backend:<commit>` and the matching frontend image. Deployment uses recorded registry digests.
 
 Deployment is manual, only from `main`, with the `deploy` input enabled. It needs a runner labelled `self-hosted`, `Linux`, `X64`, `secure-cloud`, plus the `production` environment and the host configuration file. Deployments are serialized. It does not automatically reverse database migrations after a failure.
 
@@ -330,7 +351,7 @@ These findings describe the inspected code; this documentation task did not modi
 | Settings text mentions signed links and bucket credentials | Downloads are authenticated local filesystem streams |
 | UI labels include “ENCRYPTED NODE”, “TLS 1.3” and “ALL SYSTEMS NOMINAL” | These are static labels; this code does not implement file encryption at rest, negotiate TLS itself or derive those labels from health checks. Host disk encryption was not inspected |
 | UI mount text says `/users/current/files` | Actual files live directly under `/srv/secure-cloud-storage/<uuid>` |
-| Existing overview/deployment wording describes native databases | Observed PostgreSQL and Redis are older Docker containers using named volumes |
+| Two Compose generations coexist | The current application project relies on database containers from the older project; its Compose file cannot rebuild those database services |
 | Storage directory is `0755` | The adapter requests `0700` only when creating a directory; it does not change permissions on an existing one. New files are opened with `0600` |
 | Storage summary says “LIVE” | It fetches once on mount, with no polling or upload/delete refresh subscription; the display may remain stale until remounted |
 | Session snapshot contains usage values | Cached `/auth/me` data can lag; quota admission uses current SQL counters instead |
@@ -344,10 +365,10 @@ The API also trusts the client-declared MIME classification for filtering; it va
 
 ## 13. Tests and verification scope
 
-There are **12 filesystem/config tests and 16 database integration tests**. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
+There are **32 tests: 12 filesystem/config tests, four CORS tests and 16 database integration tests**. The CORS tests cover changing tunnel origins, credentialed preflights, explicit allowlists, invalid origins and continued authentication enforcement. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
 
-The smoke script builds an isolated Docker network, starts disposable PostgreSQL/Redis, mounts a temporary upload directory, applies migrations, exercises HTTP registration/upload/list/download/quota/delete and page responses, and checks graceful backend shutdown. Its cleanup removes the temporary containers/network/directory. It does not operate on the live uploaded-file directory.
+The smoke script builds an isolated Docker network, starts disposable PostgreSQL/Redis plus the application and Nginx containers, mounts a temporary upload directory, applies migrations, exercises credentialed CORS preflights and HTTP registration/upload/list/download/quota/delete and page responses through Nginx, and checks graceful backend shutdown. Its cleanup removes the temporary containers/network/directory. It does not operate on the live uploaded-file directory.
 
-Earlier implementation validation in this session passed all 28 tests, type-check, backend lint, both Docker builds and container smoke tests. This inspection performed fresh read-only runtime/configuration/schema checks; it did not rerun the test suite or deploy anything. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
+Earlier implementation validation in this session passed all 32 tests, type-check, backend lint, both Docker builds and container smoke tests. This inspection performed fresh read-only runtime/configuration/proxy checks; it did not rerun the test suite or deploy anything. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
 
-For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). The runtime snapshot in section 2 is the current observation; the Compose and CI sections describe the infrastructure the checked-in configuration is prepared to run.
+For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). The runtime snapshot in section 2 is the current observation; the Compose section describes the active local stack, while the CI section describes automation whose remote execution was not verified.

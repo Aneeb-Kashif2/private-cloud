@@ -8,28 +8,41 @@ For the inspected code paths, request flows and actual running infrastructure sn
 
 For mobile access through Cloudflare, see [Nginx and Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md). The browser now uses same-origin `/api`; Nginx listens on port 8080.
 
-## Ubuntu setup
+## Current runtime and access
 
-Use Node.js 22+, npm, PostgreSQL and Redis installed directly on Ubuntu. No container or separate disk setup is needed.
+Verified on **6 September 2026 at approximately 20:23 PKT**: Nginx, frontend and backend containers are healthy, the migration container exited successfully, and the existing PostgreSQL/Redis containers are healthy. No `cloudflared` process was running at that snapshot.
+
+| Service | Current runtime | Port / storage |
+| --- | --- | --- |
+| Nginx | `secure-cloud-nginx-1` | 8080: routes pages and `/api` |
+| Next.js | `secure-cloud-frontend-1` | 3000: production standalone frontend |
+| Fastify | `secure-cloud-backend-1` | 4000: production API |
+| Migrations | `secure-cloud-migrate-1` | One-shot Prisma job, exit 0 |
+| PostgreSQL | `self-cloud-prj-postgres-1` | Host port 5432; existing named database volume |
+| Redis | `self-cloud-prj-redis-1` | Host port 6379; existing named cache volume |
+| Uploaded files | Ubuntu filesystem bind-mounted into backend | `/srv/secure-cloud-storage` |
+
+The current Compose project manages the app and proxy; it relies on the older database containers through host-published ports. It does not create those database services on a fresh machine. Keep them running and retain their volumes.
 
 ```bash
-sudo apt update
-sudo apt install postgresql redis-server
-sudo systemctl enable --now postgresql redis-server
-# Run the application as this ordinary user; substitute your service account if needed.
-sudo install -d -m 0700 -o "$(id -un)" -g "$(id -gn)" /srv/secure-cloud-storage
-sudo -u postgres createuser --pwprompt selfcloud
-sudo -u postgres createdb --owner=selfcloud selfcloud
-cp .env.example .env
-# Set DATABASE_URL, AUTH_SECRET and your browser-facing origins/URLs.
-cp .env backend/.env
+# From the repository root; uses backend/.env by default.
+docker compose ps -a
+docker compose up -d --build --wait --wait-timeout 120
+
+# Keep this command running for phone/public access.
+cloudflared tunnel --url http://localhost:8080
+```
+
+Open the generated HTTPS URL on your phone and sign in. The browser uses `/api`, so it never tries to reach `localhost:4000` on the phone. `FRONTEND_ORIGIN=*` accepts valid HTTP(S) origins using credential-compatible origin reflection. Nginx routes `/api/*` to Fastify and other requests to Next.js. The tunnel is separate from Compose and its temporary hostname changes across runs.
+
+Do not also start `npm run dev` while the app containers own ports 3000/4000. To use development mode instead, stop the application stack with `docker compose down`, keep the older PostgreSQL/Redis containers running, install workspace dependencies, and run:
+
+```bash
 npm ci
-npm run prisma:generate --workspace backend
-npm run prisma:deploy --workspace backend
 npm run dev
 ```
 
-Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=/api` for local development, so API requests use the same hostname as the page. Open port 3000 in the browser. In production, build with that URL configured, then run `npm start --workspace backend` and `npm start --workspace frontend` under your service manager. Use HTTPS with a reverse proxy; keep PostgreSQL and Redis private. The proxy must allow 5 GiB request bodies and sufficiently long streaming requests, with upload buffering disabled. Do not serve the storage directory as a static directory.
+Development uses Next.js on port 3000 with an `/api` rewrite to Fastify. Backend development startup runs migrations and generates Prisma before starting its watcher. For a fresh Ubuntu installation or GitHub-based deployment, follow [deployment setup](deploy/README.md) and configure the database/cache connections rather than creating a second empty database for existing files.
 
 ## Configuration
 
@@ -49,7 +62,7 @@ Set `frontend/.env.local` to `NEXT_PUBLIC_API_URL=/api` for local development, s
 
 All deployed accounts receive the 5 GiB limit during migration, including existing users. Accounts already over quota retain their metadata but cannot upload until usage is reduced. The upload quota check always uses current PostgreSQL counters, never cached session data.
 
-The backend automatically applies pending Prisma migrations before `npm run dev` and `npm start`. Development also regenerates the Prisma client. Startup stops if migration fails, preventing the API from serving requests against an outdated schema.
+Docker startup uses a separate migration service before the API starts. Host-based backend commands also apply pending Prisma migrations before `npm run dev` and `npm start`. Development also regenerates the Prisma client. Startup stops if migration fails, preventing the API from serving requests against an outdated schema.
 
 ## File workflow
 
@@ -59,7 +72,7 @@ The backend automatically applies pending Prisma migrations before `npm run dev`
 - Folder routes and file moves use PostgreSQL metadata; folder names never become disk paths.
 - `DELETE /api/files/:id`: removes file content permanently, then transactionally deletes metadata and decrements usage once. Missing content allows deletion to be retried; other filesystem failures retain metadata and quota.
 
-Files have mode `0600` inside a private directory. Only generated UUID keys are accepted, file creation is exclusive, and symlinks are not followed. User filenames appear only in metadata and encoded download headers.
+New files have mode `0600`. The adapter requests `0700` when creating its root directory, but the current existing directory is `0755`; it does not automatically tighten existing permissions. Only generated UUID keys are accepted, file creation is exclusive, and symlinks are not followed. User filenames appear only in metadata and encoded download headers.
 
 ## Existing installations and recovery
 
@@ -75,7 +88,7 @@ npm test
 npm run build
 ```
 
-Filesystem tests run without services. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
+The suite contains 32 tests, including filesystem/config, CORS and database integration coverage. Filesystem and CORS tests run without a live database. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
 
 ```bash
 DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:deploy --workspace backend
