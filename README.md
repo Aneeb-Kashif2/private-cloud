@@ -102,3 +102,5 @@ Integration coverage includes authentication, ownership, upload/download bytes, 
 Development uses `frontend/.next-dev`; production builds use `frontend/.next`. Keeping these separate prevents missing vendor chunks when building while the dev server runs.
 
 Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.
+
+WhatsApp tunnel notifications: [setup, template requirements and retry commands](deploy/WHATSAPP.md).

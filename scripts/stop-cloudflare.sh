@@ -1,38 +1,23 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-
-root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-runtime_dir=${RUNTIME_DIR:-"$root_dir/.runtime"}
-pid_file="$runtime_dir/cloudflared.pid"
-lock_dir="$runtime_dir/cloudflared.lock"
-url_file="$runtime_dir/cloudflare-url"
-
+source "$(dirname "${BASH_SOURCE[0]}")/cloudflare-common.sh"
 if [[ ! -f "$pid_file" ]]; then
-  rm -rf "$lock_dir"
-  rm -f "$url_file"
+  rm -f "$identity_file" "$url_file"
   printf '%s\n' 'No managed Quick Tunnel is running.'
   exit 0
 fi
-
-pid=$(cat "$pid_file" 2>/dev/null || true)
-if [[ ! "$pid" =~ ^[0-9]+$ ]]; then
-  rm -f "$pid_file" "$url_file"
-  rm -rf "$lock_dir"
-  printf '%s\n' 'Removed an invalid Quick Tunnel PID file.'
+pid=$(cat "$pid_file")
+if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+  clear_state
+  printf '%s\n' 'Removed stale Quick Tunnel state.'
   exit 0
 fi
-
-if kill -0 "$pid" 2>/dev/null; then
-  kill "$pid" 2>/dev/null || true
-  for _ in {1..10}; do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 1
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -KILL "$pid" 2>/dev/null || true
-  fi
-fi
-
-rm -f "$pid_file" "$url_file"
-rm -rf "$lock_dir"
+managed_process || die 'PID ownership does not match; refusing to signal an unrelated or legacy process'
+kill "$pid" 2>/dev/null || true
+for _ in {1..10}; do
+  managed_process || break
+  sleep 1
+done
+if managed_process; then kill -KILL "$pid" 2>/dev/null || true; fi
+clear_state
 printf '%s\n' 'Quick Tunnel stopped.'

@@ -312,4 +312,6 @@ logrotate --state monitoring/runtime/logrotate.status monitoring/runtime/cloudfl
 ```
 
 Unlike Docker log rotation, native rotation requires the host `logrotate` command
-and a schedule. Neither WhatsApp script is rewritten or invoked by monitoring.
+and a schedule. Neither WhatsApp script is invoked by monitoring. See
+[WhatsApp operations](../deploy/WHATSAPP.md) for lifecycle fixes, approved templates,
+and notification retry commands.
