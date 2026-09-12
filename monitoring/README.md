@@ -315,3 +315,12 @@ Unlike Docker log rotation, native rotation requires the host `logrotate` comman
 and a schedule. Neither WhatsApp script is invoked by monitoring. See
 [WhatsApp operations](../deploy/WHATSAPP.md) for lifecycle fixes, approved templates,
 and notification retry commands.
+
+## Backup status
+
+The existing Node Exporter textfile collector reads backup status from
+`/host/var/lib/secure-cloud-monitoring`. Backup scripts publish attempt status and
+last-success timestamps; a Prometheus rule flags failed attempts or a success older
+than 36 hours. No additional monitoring service or WhatsApp sender is involved.
+See [backup operations](../deploy/BACKUP_RESTORE.md) for setup, metric names,
+scheduling and recovery. Backup logs remain in the systemd journal.

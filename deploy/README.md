@@ -85,3 +85,5 @@ References: [Docker's GitHub Actions integration](https://docs.docker.com/build/
 Nginx is now included on port 8080. For the configured Cloudflare Quick Tunnel flow, use [Nginx and Cloudflare](NGINX_CLOUDFLARE.md).
 
 Monitoring and Grafana operations, required first-time credentials, and verification: [monitoring/README.md](../monitoring/README.md).
+
+Backup/restore scripts, daily scheduling and recovery procedures: [backup operations](BACKUP_RESTORE.md). These use the existing database volume and `/srv/secure-cloud-storage`; they do not provision new infrastructure.

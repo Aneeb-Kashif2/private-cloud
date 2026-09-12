@@ -104,3 +104,19 @@ Development uses `frontend/.next-dev`; production builds use `frontend/.next`. K
 Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.
 
 WhatsApp tunnel notifications: [setup, template requirements and retry commands](deploy/WHATSAPP.md).
+
+## Backups and recovery
+
+Back up PostgreSQL and local file bytes together with a brief backend maintenance
+window. Existing volumes, `.env` files and user data are preserved. Restore requires
+interactive confirmation and retains recovery copies.
+
+```bash
+sudo bash scripts/backup.sh
+sudo bash scripts/verify-backup.sh /srv/secure-cloud-backups/<backup-directory>
+sudo bash scripts/restore.sh /srv/secure-cloud-backups/<backup-directory>
+```
+
+See [backup and restore operations](deploy/BACKUP_RESTORE.md) for retention,
+permissions, manifest/checksum verification, failure recovery, daily systemd
+scheduling and backup metrics. Scheduling is supplied but not enabled automatically.
