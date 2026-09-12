@@ -12,6 +12,7 @@ import { createLocalStorage, type LocalStorage } from "./lib/storage.js";
 import { createRedis, type RedisService } from "./lib/redis.js";
 import authRoutes from "./modules/auth/routes.js";
 import fileRoutes from "./modules/files/routes.js";
+import shareRoutes from "./modules/shares/routes.js";
 import folderRoutes from "./modules/folders/routes.js";
 import storageRoutes from "./modules/storage/routes.js";
 import authPlugin from "./plugins/auth.js";
@@ -60,6 +61,7 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Invalid request", details: error.issues.map(i => ({ path: i.path.join("."), message: i.message })) } });
     if (error instanceof AppError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
+    if ((error as { code?: string }).code === "FST_ERR_RATE_LIMIT") return reply.code(429).send({ error: { code: "RATE_LIMITED", message: "Too many requests. Try again later." } });
     if ((error as { code?: string }).code === "P2002") return reply.code(409).send({ error: { code: "CONFLICT", message: "A record with that name already exists" } });
     app.log.error({ event: "request_error", err: error }, "Request failed");
     return reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" } });
@@ -68,6 +70,7 @@ export async function buildApp(overrides: { config?: Config; prisma?: PrismaClie
   await app.register(authRoutes, { prefix: "/api/auth" });
   await app.register(storageRoutes, { prefix: "/api/storage" });
   await app.register(fileRoutes, { prefix: "/api/files" });
+  await app.register(shareRoutes, { prefix: "/api" });
   await app.register(folderRoutes, { prefix: "/api/folders" });
   app.get("/health", async () => ({ status: "ok", redis: app.redis.client?.status ?? "test-adapter" }));
   app.addHook("onClose", async () => { if (!overrides.prisma) await app.prisma.$disconnect(); if (!overrides.redis) await app.redis.close(); });

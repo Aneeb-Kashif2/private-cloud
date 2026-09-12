@@ -1,16 +1,77 @@
 "use client";
-import { Braces, CloudCog, Files, FolderClosed, Gauge, LogOut, Menu, Moon, Radio, Settings, ShieldCheck, Sun, Trash2, X } from "lucide-react";
+import { Cloud, Files, FolderClosed, Gauge, LogOut, Menu, Moon, Settings, ShieldCheck, Sun, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-const links = [{ href: "/dashboard", label: "Dashboard", icon: Gauge }, { href: "/files", label: "My files", icon: Files }, { href: "/files?folders=true", label: "Folders", icon: FolderClosed }, { href: "/trash", label: "Trash", icon: Trash2 }, { href: "/settings", label: "Settings", icon: Settings }];
+const links = [
+  { href: "/dashboard", label: "Overview", icon: Gauge },
+  { href: "/files", label: "My files", icon: Files },
+  { href: "/files?folders=true", label: "Folders", icon: FolderClosed },
+  { href: "/trash", label: "Trash", icon: Trash2 },
+  { href: "/settings", label: "Settings", icon: Settings },
+];
+
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const path = usePathname(); const router = useRouter(); const [open, setOpen] = useState(false); const [dark, setDark] = useState(false); const [user, setUser] = useState<{name:string;email:string}|null>(null);
-  useEffect(() => { const stored = localStorage.getItem("theme") === "dark"; setDark(stored); document.documentElement.classList.toggle("dark", stored); api<{user:{name:string;email:string}}>("/auth/me").then(r => setUser(r.user)).catch(() => router.replace("/login")); }, [router]);
-  function toggleTheme() { const next = !dark; setDark(next); document.documentElement.classList.toggle("dark", next); localStorage.setItem("theme", next ? "dark" : "light"); }
-  async function logout() { await api("/auth/logout", { method: "POST" }); router.replace("/login"); }
-  const sidebar = <aside className="flex h-full w-[268px] flex-col border-r border-[var(--line)] bg-[var(--panel)] p-4"><div className="mb-7 flex items-center justify-between"><Link href="/dashboard" className="flex items-center gap-3"><span className="grid size-10 place-items-center border border-[var(--accent)] bg-[var(--panel-2)] text-[var(--accent)] shadow-[0_0_16px_var(--glow)]"><CloudCog size={22}/></span><span><span className="block text-base font-bold">SELF_CLOUD</span><span className="block text-[9px] text-[var(--muted)]">ENCRYPTED NODE // 01</span></span></Link><button className="md:hidden" onClick={() => setOpen(false)} aria-label="Close navigation"><X/></button></div><div className="mb-5 flex items-center gap-2 border-y border-[var(--line)] py-3 text-[10px] text-[var(--muted)]"><span className="status-dot"/>SYSTEM ONLINE <span className="ml-auto text-[var(--accent-2)]">TLS 1.3</span></div><p className="mb-2 px-3 text-[9px] font-bold text-[var(--muted)]">// NAVIGATION</p><nav className="space-y-1">{links.map(({href,label,icon:Icon},index) => <Link key={label} href={href} onClick={() => setOpen(false)} className={`group flex h-11 items-center gap-3 border px-3 text-xs font-semibold transition-colors ${path === href.split("?")[0] ? "border-[var(--accent)] bg-[var(--glow)] text-[var(--accent)]" : "border-transparent text-[var(--muted)] hover:border-[var(--line)] hover:bg-[var(--panel-2)] hover:text-[var(--ink)]"}`}><span className="text-[9px] opacity-50">0{index+1}</span><Icon size={17}/>{label.toUpperCase()}</Link>)}</nav><div className="mt-auto border-t border-[var(--line)] pt-4"><div className="mb-3 border border-[var(--line)] bg-[var(--panel-2)] p-3"><div className="flex items-center gap-2 text-[9px] text-[var(--accent)]"><ShieldCheck size={13}/>IDENTITY VERIFIED</div><p className="mt-2 truncate text-xs font-semibold">{user?.name ?? "AUTHENTICATING..."}</p><p className="mt-1 truncate text-[10px] text-[var(--muted)]">{user?.email}</p></div><button onClick={logout} className="flex h-10 w-full items-center gap-3 border border-transparent px-3 text-xs text-[var(--muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]"><LogOut size={16}/>TERMINATE SESSION</button></div></aside>;
-  return <div className="flex min-h-screen"><div className="hidden md:block">{sidebar}</div>{open && <div className="fixed inset-0 z-40 md:hidden"><button className="absolute inset-0 bg-black/70" onClick={() => setOpen(false)} aria-label="Close navigation"/>{sidebar}</div>}<div className="min-w-0 flex-1"><header className="flex h-16 items-center justify-between border-b border-[var(--line)] bg-[var(--panel)] px-4 md:px-7"><button className="md:hidden" onClick={() => setOpen(true)} aria-label="Open navigation"><Menu/></button><div className="hidden items-center gap-5 md:flex"><span className="flex items-center gap-2 text-[10px] text-[var(--accent)]"><Radio size={14}/>LIVE CONNECTION</span><span className="text-[10px] text-[var(--muted)]">/ SECURE STORAGE PROTOCOL</span></div><div className="flex items-center gap-2"><span className="hidden items-center gap-2 border-r border-[var(--line)] pr-4 text-[10px] text-[var(--muted)] sm:flex"><Braces size={14}/>NODE: PK-01</span><button onClick={toggleTheme} className="grid size-10 place-items-center border border-[var(--line)] bg-[var(--panel-2)] text-[var(--accent)] hover:border-[var(--accent)]" aria-label="Toggle color theme">{dark ? <Sun size={18}/> : <Moon size={18}/>}</button></div></header><main className="p-4 md:p-7">{children}</main></div></div>;
+  const path = usePathname();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [dark, setDark] = useState(false);
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme") === "dark";
+    setDark(stored);
+    document.documentElement.classList.toggle("dark", stored);
+    api<{ user: { name: string; email: string } }>("/auth/me")
+      .then((response) => setUser(response.user))
+      .catch(() => router.replace("/login"));
+  }, [router]);
+
+  function toggleTheme() {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+  }
+
+  async function logout() {
+    await api("/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }
+
+  const sidebar = (
+    <aside className="flex h-full w-[264px] flex-col border-r border-[var(--line)] bg-[var(--panel)] px-4 py-5">
+      <div className="flex items-center justify-between px-2">
+        <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setOpen(false)}>
+          <span className="brand-mark size-10"><Cloud size={21} strokeWidth={2.4} /></span>
+          <span><span className="block text-[15px] font-bold tracking-tight">Self Cloud</span><span className="mt-0.5 block text-[10px] text-[var(--muted)]">Private file storage</span></span>
+        </Link>
+        <button className="icon-button size-9 md:hidden" onClick={() => setOpen(false)} aria-label="Close navigation"><X size={18} /></button>
+      </div>
+
+      <div className="mx-2 mb-6 mt-8 flex items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2.5 text-[11px] text-[var(--muted)]">
+        <span className="status-dot" /> <span>All systems operational</span>
+      </div>
+      <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[.12em] text-[var(--muted)]">Workspace</p>
+      <nav className="space-y-1">
+        {links.map(({ href, label, icon: Icon }) => {
+          const active = path === href.split("?")[0];
+          return <Link key={label} href={href} onClick={() => setOpen(false)} className={`nav-item flex h-11 items-center gap-3 px-3 text-[13px] font-semibold ${active ? "nav-item-active" : ""}`}><Icon size={18} strokeWidth={active ? 2.3 : 1.8} /><span>{label}</span>{active && <span className="ml-auto size-1.5 rounded-full bg-[var(--accent)]" />}</Link>;
+        })}
+      </nav>
+
+      <div className="mt-auto border-t border-[var(--line)] pt-4">
+        <div className="mb-3 flex items-center gap-3 rounded-xl bg-[var(--panel-2)] p-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-xs font-bold text-white">{user?.name?.slice(0, 1).toUpperCase() ?? "..."}</span>
+          <div className="min-w-0"><p className="truncate text-xs font-bold">{user?.name ?? "Loading profile"}</p><p className="mt-0.5 truncate text-[10px] text-[var(--muted)]">{user?.email ?? ""}</p></div>
+          <ShieldCheck className="ml-auto shrink-0 text-[var(--accent-2)]" size={15} />
+        </div>
+        <button onClick={logout} className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-xs font-semibold text-[var(--muted)] transition-colors hover:bg-red-50 hover:text-[var(--danger)] dark:hover:bg-red-950/20"><LogOut size={16} /> Sign out</button>
+      </div>
+    </aside>
+  );
+
+  return <div className="flex min-h-screen bg-[var(--bg)]"><div className="hidden md:block">{sidebar}</div>{open && <div className="fixed inset-0 z-40 md:hidden"><button className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={() => setOpen(false)} aria-label="Close navigation" />{sidebar}</div>}<div className="min-w-0 flex-1"><header className="flex h-[72px] items-center justify-between border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--panel)_90%,transparent)] px-4 backdrop-blur-md sm:px-7"><button className="icon-button size-10 md:hidden" onClick={() => setOpen(true)} aria-label="Open navigation"><Menu size={19} /></button><div className="hidden items-center gap-2 text-xs text-[var(--muted)] md:flex"><span className="font-semibold text-[var(--ink)]">Workspace</span><span>/</span><span>{path === "/dashboard" ? "Overview" : path.split("/")[1]?.replace("-", " ")}</span></div><div className="ml-auto flex items-center gap-2"><span className="hidden rounded-full border border-[var(--line)] px-3 py-2 text-[11px] text-[var(--muted)] sm:block">Secure workspace</span><button onClick={toggleTheme} className="icon-button size-10" aria-label="Toggle color theme">{dark ? <Sun size={18} /> : <Moon size={18} />}</button></div></header><main className="p-4 sm:p-6 lg:p-8">{children}</main></div></div>;
 }

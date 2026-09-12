@@ -56,3 +56,5 @@ monitoring/runtime/
 
 # Quick Tunnel runtime state and logs; never commit.
 .runtime/
+
+!deploy/backup.env.example

@@ -1,8 +1,8 @@
 # Secure-Cloud: current code flow and infrastructure
 
-**Verified runtime snapshot:** 6 September 2026, approximately 20:23 PKT (15:23 UTC).
+**Source/configuration review: 12 September 2026 (PKT).** Runtime health was not rechecked for this documentation update. Historical observations are recorded separately in [monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md).
 
-This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The running-system observations are a point-in-time snapshot of the Ubuntu laptop. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.
+This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The topology below describes the checked-in configuration, not a claim that every container or public tunnel is currently running. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.
 
 ## 1. What the project does
 
@@ -22,50 +22,85 @@ flowchart LR
     API -->|Bind-mounted file bytes| Disk[Ubuntu filesystem: /srv/secure-cloud-storage]
 ```
 
-The browser uses the relative API base `/api`, so mobile requests stay on the same public hostname as the page. Nginx sends `/api/*` to Fastify and other paths to Next.js. Next.js also supplies an `/api/*` rewrite to the local backend for direct development access. No business logic has moved out of Fastify.
+The browser uses the relative API base `/api`, so mobile requests stay on the same public hostname as the page. Nginx sends `/api/*` and `/health` to Fastify, `/grafana/*` to Grafana, and ordinary page paths to Next.js. Next.js also supplies an `/api/*` rewrite to the local backend for direct development access. No business logic has moved out of Fastify.
 
-## 2. Infrastructure actually running at inspection time
+## 2. Full infrastructure inventory
 
-| Component | Verified state | Persistence / purpose |
-| --- | --- | --- |
-| Ubuntu laptop | Host for all application services and uploaded files | Single-machine deployment |
-| Nginx | `secure-cloud-nginx-1`, `nginx:stable-alpine`, healthy | Entry point on port 8080; configuration bind-mounted read-only |
-| Backend | `secure-cloud-backend-1`, `secure-cloud-backend:local`, healthy | Compiled Fastify API on port 4000, `NODE_ENV=production` |
-| Frontend | `secure-cloud-frontend-1`, `secure-cloud-frontend:local`, healthy | Standalone production Next.js on port 3000 |
-| Migrations | `secure-cloud-migrate-1`, exited with code 0 | One-shot Prisma migration job; successful exit is expected |
-| PostgreSQL | `self-cloud-prj-postgres-1`, `postgres:17-alpine`, healthy | Compose-managed database, published only on 127.0.0.1:5432 |
-| Redis | `self-cloud-prj-redis-1`, `redis:7.4-alpine`, healthy | Compose-managed cache, published only on 127.0.0.1:6379 |
-| Upload directory | `/srv/secure-cloud-storage`, owner `aneeb-kashif:aneeb-kashif`, mode `0755` | File bytes stored on Ubuntu and bind-mounted into the backend |
-| Cloudflare connector | No running `cloudflared` process observed | Quick Tunnel must be started separately for public/mobile access |
-| GitHub Actions / GHCR | Workflow exists locally | Remote runs, published images, runner registration and environment settings were not verified |
+The Ubuntu laptop is the application, database and storage server. Root
+[compose.yaml](compose.yaml) includes [monitoring/compose.yaml](monitoring/compose.yaml)
+under project `secure-cloud`: **15 default services** (including the one-shot
+migration job), plus optional `cloudflared` under profile `tunnel`. Native
+WhatsApp/tunnel scripts run outside Docker. No AWS, S3, EC2, Kubernetes or external
+object storage is provisioned. `infra/ec2.tf` is an empty placeholder.
 
-The `secure-cloud` Compose project now manages the application, PostgreSQL, Redis and monitoring through the included `monitoring/compose.yaml`. The original database volumes are preserved; database ports bind only to localhost. See [monitoring operations](monitoring/README.md) for adoption and recovery.
+| Service | Configured image/runtime | Listener / exposure | Responsibility |
+| --- | --- | --- | --- |
+| `nginx` | `nginx:stable-alpine` | Host port 8080; private status 127.0.0.1:8082 | Pages, API streams, health, Grafana proxy |
+| `frontend` | Local/GHCR Next.js image, Node 22 | 0.0.0.0:3000 | Production standalone UI |
+| `backend` | Local/GHCR Fastify image, Node 22 | 0.0.0.0:4000; metrics 127.0.0.1:4001 | Authentication, metadata, file streams, quota |
+| `migrate` | Same image as backend | No listener; exits after completion | `prisma migrate deploy` |
+| `postgres` | `postgres:17-alpine` | Published only at 127.0.0.1:5432 | Prisma database |
+| `redis` | `redis:7.4-alpine` | Published only at 127.0.0.1:6379 | Sessions/cache/rate limits; AOF enabled |
+| `prometheus` | `prom/prometheus:v3.14.0` | 127.0.0.1:9090 | Metric scraping/storage and alert rules |
+| `grafana` | `grafana/grafana:13.2.1` | 127.0.0.1:3002; HA bind 127.0.0.1:9094 | Dashboards; exposed through `/grafana/` |
+| `loki` | `grafana/loki:3.7.7` | 127.0.0.1:3100; gRPC 127.0.0.1:9096 | Filesystem-backed log storage |
+| `alloy` | `grafana/alloy:v1.19.2` | 127.0.0.1:12345 | Docker/native log collection and privacy filtering |
+| `node-exporter` | `prom/node-exporter:v1.12.1` | 127.0.0.1:9100 | Ubuntu CPU/RAM/disk/filesystem/network |
+| `cadvisor` | `ghcr.io/google/cadvisor:0.60.5` | 127.0.0.1:8083 | Docker resource metrics |
+| `nginx-exporter` | `nginx/nginx-prometheus-exporter:1.5.3` | 127.0.0.1:9113 | Converts private stub status to metrics |
+| `postgres-exporter` | `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` | 127.0.0.1:9187 | Database stats using `secure_cloud_monitor` |
+| `redis-exporter` | `oliver006/redis_exporter:v1.91.1-alpine` | 127.0.0.1:9121 | Redis availability, cache and command stats |
+| `cloudflared` (optional container) | `cloudflare/cloudflared:2026.9.0` | Outbound tunnel; metrics 127.0.0.1:20241 | Alternative to native tunnel; no WhatsApp sender |
 
-The **existing database containers use named Docker volumes**:
+Application and monitoring services use Linux **host networking**. PostgreSQL and
+Redis use the Compose bridge network with localhost-only published ports. Blank
+port mappings for host-network containers are expected. Ports 3000 and 4000 are
+not restricted to loopback by current application configuration; Nginx is the
+intended browser entry point, not a firewall protecting those direct listeners.
+Cloudflare Quick Tunnel uses an outbound connector to `localhost:8080`; this
+configuration does not require DNS proxy records or router port forwarding.
 
-| Existing volume | Container path | Host data directory |
-| --- | --- | --- |
-| `self-cloud-prj_postgres_data` | `/var/lib/postgresql/data` | `/var/lib/docker/volumes/self-cloud-prj_postgres_data/_data` |
-| `self-cloud-prj_redis_data` | `/data` | `/var/lib/docker/volumes/self-cloud-prj_redis_data/_data` |
+### Persistence and ownership
 
-These volumes hold database/cache data, not uploaded-file bytes. Uploaded files use the separate host bind mount. The current Compose file declares no named volumes of its own.
+| Data | Host/volume | Container destination | Lifecycle |
+| --- | --- | --- | --- |
+| User file bytes | `/srv/secure-cloud-storage` bind mount | Same path in backend | Must already exist; independent of containers |
+| PostgreSQL | External `self-cloud-prj_postgres_data` | `/var/lib/postgresql/data` | Existing database retained |
+| Redis | External `self-cloud-prj_redis_data` | `/data` | AOF/cache state retained |
+| Prometheus | `secure-cloud_prometheus_data` | `/prometheus` | Named monitoring volume |
+| Grafana | `secure-cloud_grafana_data` | `/var/lib/grafana` | Login/configuration database and local state |
+| Loki | `secure-cloud_loki_data` | `/loki` | Chunks, indexes, compactor state |
+| Alloy | `secure-cloud_alloy_data` | `/var/lib/alloy/data` | Log collection positions |
+| Monitoring credentials | `monitoring/runtime/` by default | Selected env files/secret mount | Ignored by Git and Docker build context |
+| Native tunnel state | `.runtime/` by default | Read-only `/var/log/secure-cloud-tunnel` in Alloy | Log, URL, PID, process identity, operation lock |
 
-Application and monitoring services use Linux host networking. PostgreSQL and Redis use a bridge network with published localhost-only ports. Blank port mappings in `docker compose ps` for the application containers are therefore expected.
+Changing the Compose project name changes the default monitoring volume names.
+Database container names remain `self-cloud-prj-postgres-1` and
+`self-cloud-prj-redis-1`, even though the current project manages them.
+`APP_UID`/`APP_GID` default to 1000 for application containers and must match storage
+permissions. The setup does not repartition the laptop or put user bytes in a
+Docker named volume. Coordinate PostgreSQL and file-directory backups; a database
+backup alone does not contain uploaded content. No automated backup scheduler or
+cross-filesystem transaction is implemented.
 
-The running backend environment was checked selectively: `NODE_ENV=production`, `FRONTEND_ORIGIN=*`, `STORAGE_PATH=/srv/secure-cloud-storage`, and `STORAGE_LIMIT_BYTES=5368709120`. Compose overrides development defaults from `backend/.env`. The normal local Compose environment source is `backend/.env`; the optional GitHub deployment job instead expects `/etc/secure-cloud/backend.env` through `APP_ENV_FILE`.
+### Nginx route map
 
-Fresh checks through Nginx returned:
-
-| Check | Result |
+| Incoming path | Destination |
 | --- | --- |
-| `GET http://127.0.0.1:8080/login` | HTTP 200 |
-| `GET http://127.0.0.1:8080/api/files` without a cookie | HTTP 401, as expected for protected data |
-| `GET http://127.0.0.1:8080/health` | `{"status":"ok","redis":"ready"}` |
-| Migration container status | `Exited (0)` |
+| `/api/*` | Fastify :4000, preserving `/api`; buffering/cache disabled |
+| `/health` | Fastify :4000/health |
+| `/grafana` | Redirect to `/grafana/` |
+| `/grafana/*` | Grafana :3002, including WebSocket upgrade headers |
+| `/metrics` | 404; API metrics use a separate private socket |
+| Other paths | Next.js :3000 |
+| `127.0.0.1:8082/stub_status` | Nginx status for its exporter only |
 
-The local-storage migration was confirmed applied during the earlier schema inspection; the current migration job also completed successfully. The health route reports API liveness and Redis client state, but does not execute a database query or disk check on every request.
-
-To make the current local stack available through the user's Quick Tunnel setup, run `cloudflared tunnel --url http://localhost:8080` and keep it running. Use its generated HTTPS URL on the phone. A local healthy stack does not by itself establish that a public tunnel is active.
+Nginx accepts bodies up to 5 GiB and uses long upload/proxy timeouts. It forwards
+host and scheme information, including Cloudflare's HTTPS scheme. Local Nginx
+TLS certificates are not configured: public TLS terminates at Cloudflare. Set
+`GRAFANA_ROOT_URL` for a stable/public hostname and `GRAFANA_COOKIE_SECURE=true`
+when accessing Grafana exclusively over HTTPS. Grafana requires its own login;
+Secure Cloud sessions do not authenticate it.
 
 ## 3. Where the code lives
 
@@ -100,7 +135,7 @@ To make the current local stack available through the user's Quick Tunnel setup,
 
 ### Current Docker startup
 
-The active stack was started with Compose. The migration container runs first and exits successfully; the backend then starts, the frontend waits for backend health, and Nginx waits for both application containers. Container commands run compiled backend JavaScript and the standalone Next.js server. `npm run dev` is an alternative development mode, not how the current containers run. Do not run it concurrently on the same ports.
+Compose waits for PostgreSQL and Redis health before running the migration container; after it exits successfully, the backend then starts, the frontend waits for backend health, and Nginx waits for both application containers. Container commands run compiled backend JavaScript and the standalone Next.js server. `npm run dev` is an alternative development mode, not how the current containers run. Do not run it concurrently on the same ports.
 
 ### Alternative development startup
 
@@ -295,7 +330,7 @@ All routes below require a session except register, login and health.
 
 ## 10. Docker configuration available in the repository
 
-[compose.yaml](compose.yaml) defines four services in the running project `secure-cloud`:
+[compose.yaml](compose.yaml) defines the four application/proxy services and includes eleven additional default infrastructure services plus an optional tunnel. Application dependencies are:
 
 ```mermaid
 flowchart LR
@@ -315,7 +350,7 @@ The backend image builds TypeScript and Prisma, removes development dependencies
 
 Both application images default to the non-root `node` user. The separate Nginx service uses the official Nginx image and its default user configuration. For backend/frontend, Compose allows `APP_UID`/`APP_GID` overrides to match the upload directory owner, drops capabilities and prevents privilege escalation. The upload directory is a bind mount at the same path and must already exist on the host. Environment values come from `APP_ENV_FILE` (default `backend/.env`); the deployment job explicitly uses `/etc/secure-cloud/backend.env`.
 
-Nginx is included and running with [deploy/nginx/default.conf](deploy/nginx/default.conf). It preserves the `/api` prefix, forwards host/protocol information, supports WebSocket upgrades, disables API caching and buffering, and allows bodies up to 5 GiB. The configured Quick Tunnel terminates public HTTPS at Cloudflare and forwards to local Nginx over HTTP; local TLS certificate provisioning is not part of this setup. See [Nginx and Cloudflare](deploy/NGINX_CLOUDFLARE.md). Cloudflare request limits can still reject a large upload before it reaches Nginx; this app does not implement resumable/chunked uploads.
+Nginx is configured with [deploy/nginx/default.conf](deploy/nginx/default.conf). It preserves the `/api` prefix, forwards host/protocol information, supports WebSocket upgrades, disables API caching and buffering, and allows bodies up to 5 GiB. The configured Quick Tunnel terminates public HTTPS at Cloudflare and forwards to local Nginx over HTTP; local TLS certificate provisioning is not part of this setup. See [Nginx and Cloudflare](deploy/NGINX_CLOUDFLARE.md). Cloudflare request limits can still reject a large upload before it reaches Nginx; this app does not implement resumable/chunked uploads.
 
 ## 11. GitHub Actions flow
 
@@ -369,19 +404,226 @@ There are **35 tests: 12 filesystem/config tests, four CORS tests, three observa
 
 The smoke script builds an isolated Docker network, starts disposable PostgreSQL/Redis plus the application and Nginx containers, mounts a temporary upload directory, applies migrations, exercises credentialed CORS preflights and HTTP registration/upload/list/download/quota/delete and page responses through Nginx, and checks graceful backend shutdown. Its cleanup removes the temporary containers/network/directory. It does not operate on the live uploaded-file directory.
 
-Earlier implementation validation in this session passed all 32 tests, type-check, backend lint, both Docker builds and container smoke tests. This inspection performed fresh read-only runtime/configuration/proxy checks; it did not rerun the test suite or deploy anything. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
+Earlier monitoring work recorded 35 passing tests, application builds and live application checks. Those are historical results, not a fresh health report. This update reviewed repository sources only; it did not run tests, deploy containers, open a tunnel or send WhatsApp messages. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
 
-For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). The runtime snapshot in section 2 is the current observation; the Compose section describes the active local stack, while the CI section describes automation whose remote execution was not verified.
+For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). Section 2 describes configured infrastructure; neither present container health nor remote Actions execution was verified in this update.
 
-## Monitoring extension
+## 14. Monitoring architecture and data flow
 
-See [monitoring/README.md](monitoring/README.md) for the current full topology,
-ports, setup, dashboards, log privacy policy, retention, and verification.
-Fastify publishes metrics on a separate localhost:4001 socket; its request hooks
-observe outcomes without changing authentication or storage. Aggregate storage
-metrics are read every 60 seconds. Nginx serves Grafana at `/grafana/` and exposes
-stub status only on localhost:8082. Alloy sends privacy-filtered Compose logs to
-Loki. Prometheus scrapes host/container/application/exporter metrics every 30s.
-Seven dashboards and both data sources are provisioned from Git.
+```mermaid
+flowchart LR
+    Phone[Browser or phone] -->|HTTPS| Edge[Cloudflare edge]
+    Edge --> Tunnel[Native or container cloudflared]
+    Tunnel --> N[Nginx :8080]
+    LAN[Local or LAN browser] --> N
+    N -->|pages| F[Next.js :3000]
+    N -->|API and health| A[Fastify :4000]
+    N -->|/grafana/| G[Grafana :3002]
+    A --> DB[(PostgreSQL)]
+    A --> R[(Redis)]
+    A --> Disk[Local file directory]
+    A --> AM[Private metrics :4001]
+    Host[Ubuntu host] --> NE[Node Exporter]
+    Docker[Docker engine] --> CA[cAdvisor]
+    N --> NX[Nginx exporter]
+    DB --> PE[PostgreSQL exporter]
+    R --> RE[Redis exporter]
+    AM --> P[Prometheus]
+    NE --> P
+    CA --> P
+    NX --> P
+    PE --> P
+    RE --> P
+    Docker -->|project stdout and stderr| Alloy[Alloy privacy pipeline]
+    Tunnel -->|native log file or Docker stdout| Alloy
+    Alloy --> L[Loki]
+    G -->|query| P
+    G -->|query| L
+    Script[Native start script] --> Tunnel
+    Script -->|after public health succeeds| Sender[WhatsApp sender]
+    Sender -->|HTTPS Graph API| Meta[Meta WhatsApp Cloud API]
+    Meta --> Recipient[Configured WhatsApp recipient]
+```
 
-Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.
+[Prometheus configuration](monitoring/prometheus/prometheus.yml) defines ten jobs:
+backend, node, cAdvisor, Nginx exporter, PostgreSQL exporter, Redis exporter,
+Prometheus, Grafana, Loki and Alloy. Scrape and rule evaluation intervals are
+30 seconds. The optional cloudflared metrics port is not a configured scrape job.
+
+[Fastify observability](backend/src/lib/observability.ts) records request counts
+by method/route template/status, latency histograms, 4xx/5xx errors, upload outcomes
+and failures, download outcomes and authentication failures. Process metrics use
+`secure_cloud_` prefixes. Routes are templates rather than filenames, user IDs or
+raw URLs. Downloads measure HTTP response outcomes, not whether the recipient
+saved the complete file.
+
+Every 60 seconds, separate aggregate reads report registered users, file counts,
+used/reserved bytes, aggregate quotas and filesystem available bytes. Collection
+success and last-success time reveal stale data. These observations do not update
+quota metadata or participate in upload admission. Filesystem free space includes
+the effects of all other laptop data, so it differs from application usage.
+
+[Alloy configuration](monitoring/alloy/config.alloy) discovers containers with
+Compose project label `secure-cloud` every 15 seconds. It tails their stdout/stderr
+and the native `.runtime/cloudflared.log`, then sends filtered events to Loki.
+Docker logs have job `secure-cloud-docker`; native tunnel logs have job
+`secure-cloud-native`; both carry a `service` label. Other Compose projects are
+not automatically collected. URL/PID/identity files and `.env` credentials are
+not selected as log inputs.
+
+Backend/Nginx HTTP events retain approved method, route, status and duration
+fields. Other messages become generic info or warning/error events: raw SQL,
+exceptions, request bodies, headers, tokens and URLs are not forwarded into Loki.
+This intentionally limits diagnostic detail. Local Docker logs can still contain
+third-party output and should be treated as privileged. Nginx access logs are
+JSON; raw error logging is limited to critical severity. Backend framework
+request/response/error serializers also remove sensitive details.
+
+Grafana automatically provisions Prometheus and Loki data sources, with UIDs
+`prometheus` and `loki`. Seven checked-in dashboards cover **host, containers,
+Nginx, backend, PostgreSQL, Redis and storage** and include related log panels.
+Dashboard edits belong in [dashboard JSON](monitoring/grafana/dashboards).
+Nginx status/error panels combine exporter metrics with LogQL because stub status
+does not expose per-response HTTP status counters.
+
+### Retention, limits and trust boundaries
+
+| Component | Configured limits |
+| --- | --- |
+| Prometheus | Seven days / 1 GB TSDB block retention; WAL/head need additional space |
+| Loki | 72-hour retention, two-hour deletion delay, 48 MB combined caches |
+| Docker logs | 5 MB × two files per managed container |
+| Native tunnel log | Generated logrotate config: 5 MB, two rotations; host scheduling required |
+| Monitoring RAM | Caps total 1,248 MiB across nine monitoring services; optional tunnel adds 128 MiB |
+
+Caps are not reserved memory or measured consumption. Application, database and
+Redis services have no memory caps in current Compose. Loki retention is not a
+hard disk quota. Prometheus rules cover missing targets, low filesystem space,
+API errors and stale storage metrics; no Alertmanager/email/paging destination is
+configured. WhatsApp currently sends tunnel notifications, not monitoring alerts.
+
+Collectors assume a trusted Ubuntu host. Alloy has a read-only Docker socket
+mount, which does **not** make the Docker API read-only. cAdvisor is privileged and
+mounts host runtime/kernel/Docker paths; Node Exporter uses host PID visibility and
+a read-only host filesystem mount. Monitoring ports bind to loopback and are not
+published through Nginx, except Grafana. This is a single-host deployment without
+replication or failover.
+
+## 15. Cloudflare and WhatsApp lifecycle
+
+The native entry points are [start](scripts/start-cloudflare.sh),
+[stop](scripts/stop-cloudflare.sh), [shared lifecycle helpers](scripts/cloudflare-common.sh)
+and [notification sender](scripts/notify-whatsapp.mjs). They run as the Ubuntu
+user, outside Compose. Node 22+, project dependencies, curl, cloudflared and flock
+are required; Meta account/token/template provisioning is external to this repo.
+
+1. Acquire a shared exclusive operation lock and validate WhatsApp configuration.
+2. Refuse duplicate tunnels or a live PID with mismatched ownership information.
+3. Check local Nginx `/health`, start cloudflared with `nohup`, and capture its
+   generated `https://…trycloudflare.com` origin.
+4. Wait for public `/health` to return 200. Save the URL and keep the healthy tunnel.
+5. The sender checks public health again and submits URL/health information to
+   Meta. A notification failure leaves the healthy tunnel running.
+
+Stop verifies PID, process start time, boot identity, process name and owner before
+signaling it. The tunnel survives terminal closure, but no boot-time systemd unit
+or persistent named tunnel is configured. Legacy PID files without identity
+metadata require manual inspection before controlling an already-running process.
+The optional Compose `tunnel` profile is an alternative that restarts with Docker;
+it does not invoke the WhatsApp sender. Do not run both alternatives together.
+
+WhatsApp settings: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+`WHATSAPP_RECIPIENT`, optional `WHATSAPP_API_VERSION` (default `v23.0`),
+`WHATSAPP_TEMPLATE_NAME` and `WHATSAPP_TEMPLATE_LANGUAGE` (default `en_US`).
+Without a template the sender submits a text message. Template mode requires an
+approved template with two positional body parameters: the full URL and health
+status. Header/button/named parameters are not implemented. Config parsing uses
+dotenv, with process environment taking precedence; credentials are not passed
+as command-line arguments. Only numeric provider error codes are reported.
+
+A message ID means API acceptance, not confirmed delivery. There is no delivery
+status webhook and no automatic retry after an ambiguous timeout. A manual retry
+can reuse the saved URL without restarting cloudflared. Full setup, messaging
+window requirements and commands: [WhatsApp operations](deploy/WHATSAPP.md).
+
+## 16. Environment sources, setup and deployment operations
+
+| Source / variable | Consumer and behavior |
+| --- | --- |
+| Root `.env` | Compose interpolation and native WhatsApp configuration; not automatically the backend env file |
+| `APP_ENV_FILE` | Backend/migrate and monitoring setup; defaults to `backend/.env` |
+| `DATABASE_URL`, `REDIS_URL`, `AUTH_SECRET` | Backend database/cache/session configuration |
+| `FRONTEND_ORIGIN` | Backend CORS; `*` reflects valid origins with credentials |
+| `NEXT_PUBLIC_API_URL` | Frontend build argument; defaults to `/api`, requires rebuild to change |
+| `APP_UID`, `APP_GID` | Application process ownership, default 1000 |
+| `STORAGE_PATH`, `STORAGE_LIMIT_BYTES` | Compose explicitly sets `/srv/secure-cloud-storage` and `5368709120` |
+| `METRICS_PORT` | Backend loopback metrics listener, default 4001; changing it also requires changing the scrape target |
+| `MONITORING_RUNTIME_DIR` | Generated monitoring credentials, default `monitoring/runtime` |
+| `GRAFANA_ROOT_URL`, `GRAFANA_COOKIE_SECURE` | Grafana public subpath URL and HTTPS cookie setting |
+| `ENV_FILE`, `RUNTIME_DIR` | Native tunnel/WhatsApp configuration file and state directory |
+| `CLOUDFLARED_RUNTIME_DIR` | Alloy bind source; must match custom native `RUNTIME_DIR` |
+| `BACKEND_IMAGE`, `FRONTEND_IMAGE` | Local image tags or deployment GHCR digests |
+
+[Monitoring preparation](monitoring/scripts/prepare.mjs) generates missing Grafana
+and monitoring-role secrets, prepares env files/native logrotate configuration,
+and grants `pg_monitor` to a dedicated PostgreSQL role. It requires a reachable
+local database and the existing external database volumes. It is **not a fresh
+host installer**. [Database adoption](monitoring/scripts/adopt-databases.sh) is a
+one-time bridge from older project containers: it preserves volumes, retains old
+containers stopped, and includes rollback if recreation fails. Never run old and
+new PostgreSQL/Redis containers against the same volumes simultaneously.
+
+There is currently **no `install.sh`** in the repository. The requested one-command
+installer has not been implemented; prerequisites, storage ownership, initial
+configuration and existing-database preparation remain operator setup steps.
+Use [deployment setup](deploy/README.md) and [monitoring operations](monitoring/README.md).
+
+After prerequisites and preparation, from the repository root:
+
+```bash
+docker compose build
+docker compose up -d --wait --wait-timeout 180
+docker compose ps --all
+# Explicit existing migration command, when the database is available:
+docker compose run --rm --no-deps migrate
+# Native tunnel + WhatsApp (invokes Meta):
+bash scripts/start-cloudflare.sh
+bash scripts/stop-cloudflare.sh
+# Notification retry only (also invokes Meta):
+node scripts/notify-whatsapp.mjs send .env .runtime/cloudflare-url
+```
+
+Compose orders PostgreSQL/Redis health → successful migration → backend health →
+frontend health → Nginx. Long-running services use `unless-stopped`; migrate uses
+no restart. Backend gets five minutes to drain uploads at shutdown. Healthchecks
+cover application endpoints, database readiness and images with an HTTP client;
+minimal images rely on scrape/readiness checks. `/health` remains a liveness route
+with Redis client state, not a full database/disk readiness transaction.
+
+GitHub Actions performs dependency installation, Prisma generation/migrations,
+type-check, backend lint, tests, builds and monitoring config validation. It builds
+and smoke-tests application images, publishes main-branch images to GHCR, and
+passes immutable digests to an optional manually requested deployment job. The
+production runner must carry labels `self-hosted, Linux, X64, secure-cloud`, have
+Docker access and preprovisioned `/etc/secure-cloud/backend.env` and
+`/etc/secure-cloud/monitoring` files. Deployment pulls images, stops app writers,
+runs migrations, then reconciles Compose with a health wait. It is not zero-downtime
+or automatic rollback. GitHub infrastructure, published images and runner health
+cannot be inferred from checked-in workflow YAML.
+
+### Stop, recovery and remaining operational limits
+
+`docker compose stop` preserves containers and data. `docker compose down` removes
+project containers/network but retains volumes unless `-v` is supplied; external
+database volumes are separate from project-managed monitoring volumes. Neither
+command removes `/srv/secure-cloud-storage`. Native cloudflared is outside Compose
+and must be stopped separately. Container deletion is not a backup and removes
+data stored only in writable container layers.
+
+Current unresolved runtime checks are recorded in
+[monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md): cAdvisor
+startup, all targets healthy together, final configuration reconciliation and
+end-to-end log ingestion were not fully confirmed in prior work. WhatsApp delivery
+has not been verified. This documentation update does not change those statuses.
+No tests, containers, migrations, tunnels or notifications were intentionally run
+for this documentation update.

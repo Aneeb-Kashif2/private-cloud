@@ -21,3 +21,8 @@ groups:
         for: 3m
         labels: {severity: warning}
         annotations: {summary: 'Storage metrics collection is failing or stale'}
+      - alert: SecureCloudBackupUnhealthy
+        expr: secure_cloud_backup_last_attempt_success == 0 or time() - secure_cloud_backup_last_success_timestamp_seconds > 129600
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: 'Secure Cloud backup failed or last successful backup is older than 36 hours'}

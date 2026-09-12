@@ -1,42 +1,114 @@
-# Secure-Cloud project overview
+# Secure Cloud: project and infrastructure overview
 
-Current monitoring and infrastructure: [monitoring/README.md](monitoring/README.md). Compose now includes Prometheus, Grafana, Loki, Alloy, host/container/service exporters and the existing databases (preserving their volumes). Grafana is served at `/grafana/`; monitoring and database ports bind only to localhost. Complete the documented one-time setup before starting this version.
+**Updated from repository sources on 12 September 2026 (PKT).** This describes
+configured infrastructure; it is not a fresh report of running containers.
 
-Updated from the running laptop on **6 September 2026, 20:23 PKT**.
-
-Secure-Cloud runs on one Ubuntu laptop. Nginx, the Next.js frontend and the Fastify backend are healthy Docker containers in the `secure-cloud` Compose project. Its Prisma migration job completed with exit code 0. PostgreSQL and Redis are now managed by the included monitoring Compose file, retain their original container names and external named volumes, and publish ports only on localhost.
+Secure Cloud runs on one Ubuntu laptop. Docker Compose manages the Next.js
+frontend, Fastify backend, Nginx, PostgreSQL, Redis and a local monitoring stack.
+User file bytes remain in `/srv/secure-cloud-storage`. PostgreSQL contains users,
+sessions, folders, file metadata and quota counters; Redis provides caching and
+rate-limit support. Every user has a 5 GiB (`5368709120` bytes) quota.
 
 ```mermaid
 flowchart LR
-    Phone[Phone or browser] -->|HTTPS when running| CF[Cloudflare Quick Tunnel]
-    CF --> Tunnel[cloudflared on laptop]
-    Tunnel --> N[Nginx :8080]
-    N -->|Pages| F[Next.js :3000]
-    N -->|/api| A[Fastify :4000]
-    A --> P[(PostgreSQL :5432)]
-    A --> R[(Redis :6379)]
-    A --> D["/srv/secure-cloud-storage"]
+    Phone[Browser or phone] -->|HTTPS| CF[Cloudflare Quick Tunnel]
+    CF --> T[cloudflared on Ubuntu]
+    T --> N[Nginx :8080]
+    LAN[Local or LAN browser] --> N
+    N -->|pages| F[Next.js :3000]
+    N -->|API and health| A[Fastify :4000]
+    A --> DB[(PostgreSQL)]
+    A --> R[(Redis)]
+    A --> D[Local user files]
+    N -->|/grafana/| G[Grafana]
+    Metrics[Host, container, API and service exporters] --> P[Prometheus]
+    Logs[Docker logs and native tunnel log] --> Alloy[Alloy privacy filter]
+    Alloy --> L[Loki]
+    G --> P
+    G --> L
+    Start[Native tunnel start script] --> T
+    Start --> WA[Meta WhatsApp API]
 ```
 
-No `cloudflared` process was running at the snapshot. Start public/mobile access separately:
+## Application flow
 
-```bash
-cloudflared tunnel --url http://localhost:8080
-```
+The browser uses relative `/api` URLs, so mobile traffic stays on the public
+hostname. Nginx routes API traffic and `/health` to Fastify, ordinary pages to
+Next.js, and `/grafana/` to Grafana. Next.js has an API rewrite for direct development
+access. Production and development builds use separate `.next` and `.next-dev`
+directories.
 
-The browser calls relative `/api` URLs, keeping requests on the same hostname as the page. `FRONTEND_ORIGIN=*` permits valid HTTP(S) origins; Fastify reflects the actual origin so cookie-based authentication works. Login uses Argon2id password verification and opaque HttpOnly session cookies. Production cookies require the public HTTPS flow.
+Authentication uses Argon2id password hashing and opaque HttpOnly session cookies.
+Production cookies are Secure. `FRONTEND_ORIGIN=*` reflects valid HTTP(S) origins
+with credentials. Uploads reserve quota atomically in PostgreSQL, stream into safe
+UUID paths, verify the exact size, then commit metadata and usage. Failures clean
+up partial content/reservations. Downloads enforce ownership; permanent deletion
+removes bytes and decrements metadata usage. Folders are logical database records.
 
-Uploads stream through Nginx and Fastify into private UUID files on the laptop. PostgreSQL atomically reserves quota, and metadata plus used-byte accounting commit only after an exact-size write. The per-user limit is **5 GiB (`5368709120` bytes)**. Downloads verify ownership and stream the local content. Deletion permanently removes bytes and then transactionally removes metadata and decrements usage. Folders are database relationships, not physical disk directories.
+## Complete infrastructure
 
-PostgreSQL holds users, sessions, folders and file metadata; Redis holds cached sessions/metadata and supports rate limiting. Actual uploaded bytes use the host bind mount `/srv/secure-cloud-storage`, not a database blob or named Docker volume. Files are not sent to external object storage. Cloudflare's own request limits can be lower than the application's 5 GiB limit.
+Root `compose.yaml` includes `monitoring/compose.yaml`: 15 default services,
+including the one-shot migration job, and an optional container tunnel.
 
-The GitHub Actions workflow validates code, runs database and Nginx container tests, publishes tested main-branch application images to GHCR, and supports optional manual deployment to a self-hosted Ubuntu runner. Remote Actions runs, registry publication and runner setup were not verified in this documentation update.
+| Layer | Components |
+| --- | --- |
+| Application | Nginx, Next.js, Fastify, Prisma migration job |
+| Persistent services | PostgreSQL 17, Redis 7.4 with AOF |
+| Metrics | Prometheus, Node Exporter, cAdvisor, Nginx/PostgreSQL/Redis exporters, private Fastify metrics |
+| Logs | Alloy Docker discovery and native tunnel-file collection → Loki |
+| Dashboards | Grafana with provisioned Prometheus/Loki sources and seven dashboards |
+| Public access | Native cloudflared + WhatsApp scripts, or optional Compose `tunnel` profile |
+| CI/CD | GitHub Actions checks/builds, GHCR images, optional self-hosted production deployment |
 
-Local verification returned HTTP 200 for Nginx `/login`, HTTP 401 for unauthenticated `/api/files`, and an API health response with Redis `ready`. The latest implementation validation passed 32 tests, type-check, backend lint, both application image builds and Nginx smoke tests. Tests were not rerun for this documentation-only update.
+Application and monitoring containers use Linux host networking. PostgreSQL and
+Redis publish only localhost ports 5432/6379. Monitoring binds to loopback; Grafana
+is exposed through Nginx at **http://localhost:8080/grafana/**. Direct app listeners
+3000/4000 still bind all interfaces; Nginx routing does not restrict those ports.
+The full port/image inventory is in the [detailed architecture](CURRENT_ARCHITECTURE_AND_FLOW.md).
 
-- [Detailed architecture, code map and current runtime](CURRENT_ARCHITECTURE_AND_FLOW.md)
-- [Operating commands and configuration](README.md)
+Existing PostgreSQL/Redis external volumes are preserved. Prometheus, Grafana,
+Loki and Alloy have their own persistent volumes. User file bytes use the host
+bind mount, not a named volume. Monitoring is capped at 1,248 MiB combined memory;
+Prometheus retains seven days/1 GB of blocks, Loki retains 72 hours, and managed
+Docker logs rotate at 5 MB × two files. Native tunnel log rotation needs a host
+schedule. There is no external object storage, AWS deployment or Kubernetes.
+
+## Cloudflare and WhatsApp
+
+The native start script creates a Quick Tunnel to **Nginx port 8080**, waits for
+public health, then sends its URL/status through Meta. Stop verifies process
+identity before signaling it. The detached tunnel survives terminal closure;
+there is no native boot-time service configured. Notification failures preserve
+the healthy tunnel and can be retried without restarting it.
+
+WhatsApp supports text or an approved two-body-parameter template. A successful
+API response confirms acceptance, not delivery; delivery webhooks are absent.
+Do not run the optional Docker tunnel simultaneously with the native scripts.
+See [WhatsApp setup and commands](deploy/WHATSAPP.md). Monitoring tails the native
+cloudflared log but does not send messages or collect WhatsApp credentials.
+
+## Setup, deployment and current limits
+
+Root `.env` supplies Compose interpolation/native WhatsApp configuration;
+`backend/.env` is the default application env file. Monitoring credentials are
+locally generated under `monitoring/runtime`. Production Actions expects
+`/etc/secure-cloud/backend.env` and `/etc/secure-cloud/monitoring`.
+
+There is **no `install.sh` yet**. Existing monitoring preparation requires a
+reachable database and the original volumes; it is not a fresh-machine bootstrap.
+After setup, Compose orders database health → migrations → backend → frontend →
+Nginx. Updates can interrupt uploads; the backend has a five-minute shutdown grace
+period. There is no automatic backup, HA/failover, delivery webhook or configured
+alert-notification destination. The laptop remains a single point of failure.
+
+Earlier work verified application operations and Grafana provisioning. Current
+container status, final monitoring ingestion, cAdvisor and WhatsApp delivery were
+not rechecked here; historical success must not be treated as present health.
+See [implementation status](monitoring/IMPLEMENTATION_STATUS.md).
+
+- [Full architecture, code flow, ports, volumes and environment map](CURRENT_ARCHITECTURE_AND_FLOW.md)
+- [Application usage](README.md)
 - [Docker and GitHub Actions deployment](deploy/README.md)
-- [Nginx and mobile/Cloudflare access](deploy/NGINX_CLOUDFLARE.md)
-
-Monitoring implementation and deployment status: [monitoring/IMPLEMENTATION_STATUS.md](monitoring/IMPLEMENTATION_STATUS.md). This records what is implemented, what was observed running, and the remaining runtime work.
+- [Nginx and Cloudflare routing](deploy/NGINX_CLOUDFLARE.md)
+- [Monitoring operations and troubleshooting](monitoring/README.md)
+- [WhatsApp integration](deploy/WHATSAPP.md)

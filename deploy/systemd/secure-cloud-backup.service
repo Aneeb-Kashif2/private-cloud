@@ -1,0 +1,22 @@
+[Unit]
+Description=Coordinated Secure Cloud PostgreSQL and file backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/secure-cloud
+EnvironmentFile=-/etc/secure-cloud/backup.env
+ExecStart=/usr/bin/bash /opt/secure-cloud/scripts/backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=0
+TimeoutStopSec=360
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal

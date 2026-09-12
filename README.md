@@ -6,13 +6,13 @@ Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cac
 
 For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions setup](deploy/README.md). Docker runs the application on this same Ubuntu server and bind-mounts the existing storage directory.
 
-For the inspected code paths, request flows and actual running infrastructure snapshot, see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
+For the full configured infrastructure, ports, persistence and request flows (updated 12 September 2026), see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
 
 For mobile access through Cloudflare, see [Nginx and Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md). The browser now uses same-origin `/api`; Nginx listens on port 8080.
 
 ## Current runtime and access
 
-Verified on **6 September 2026 at approximately 20:23 PKT**: Nginx, frontend and backend containers are healthy, the migration container exited successfully, and the existing PostgreSQL/Redis containers are healthy. No `cloudflared` process was running at that snapshot.
+The configured topology below includes the application and databases; monitoring and WhatsApp are covered in the [full architecture](CURRENT_ARCHITECTURE_AND_FLOW.md). Current container health and public tunnel availability were not rechecked during the 12 September documentation update. There is no `install.sh` yet; complete the existing deployment/monitoring setup before starting Compose.
 
 | Service | Current runtime | Port / storage |
 | --- | --- | --- |
