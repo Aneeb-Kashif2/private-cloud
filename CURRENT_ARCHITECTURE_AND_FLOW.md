@@ -1,6 +1,6 @@
 # Secure-Cloud: current code flow and infrastructure
 
-**Source/configuration review: 12 September 2026 (PKT).** Runtime health was not rechecked for this documentation update. Historical observations are recorded separately in [monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md).
+**Source/configuration review: 13 September 2026 (PKT).** This is a checked-in architecture and security review, not a claim that every service is currently running. Runtime observations are recorded separately in [monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md). The personal file-export flow added after the previous review is included below.
 
 This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The topology below describes the checked-in configuration, not a claim that every container or public tunnel is currently running. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.
 
@@ -80,8 +80,9 @@ Database container names remain `self-cloud-prj-postgres-1` and
 `APP_UID`/`APP_GID` default to 1000 for application containers and must match storage
 permissions. The setup does not repartition the laptop or put user bytes in a
 Docker named volume. Coordinate PostgreSQL and file-directory backups; a database
-backup alone does not contain uploaded content. No automated backup scheduler or
-cross-filesystem transaction is implemented.
+backup alone does not contain uploaded content. The repository provides an optional
+daily systemd service/timer, but it is not enabled by Compose or by this checkout.
+No cross-filesystem transaction is implemented.
 
 ### Nginx route map
 
@@ -121,7 +122,8 @@ Secure Cloud sessions do not authenticate it.
 | Offline maintenance | [recalculate-storage.ts](backend/src/scripts/recalculate-storage.ts) | Rebuilds usage counters from file metadata for all users |
 | Frontend shell | [frontend/components/app-shell.tsx](frontend/components/app-shell.tsx) | Navigation, session lookup, logout, mobile menu and theme |
 | Login/register | [frontend/components/auth-form.tsx](frontend/components/auth-form.tsx) | Shared form and API submission |
-| File interface | [frontend/components/file-manager.tsx](frontend/components/file-manager.tsx) | Folder selection, upload progress, search, sorting, pagination and deletion modal |
+| File interface | [frontend/components/file-manager.tsx](frontend/components/file-manager.tsx), [backup-button.tsx](frontend/components/backup-button.tsx) | Folder selection, upload progress, search, sorting, pagination, deletion and selected-file export |
+| Personal export | [backend/src/lib/file-backup.ts](backend/src/lib/file-backup.ts), `/api/files/backup` | Streams selected owned files as a ZIP64 archive with a SHA-256 manifest |
 | Storage interface | [frontend/components/storage-summary.tsx](frontend/components/storage-summary.tsx) | Usage/count display fetched from `/api/storage` |
 | Browser networking | [frontend/lib/api.ts](frontend/lib/api.ts) | Credentialed fetch, binary upload through XHR and byte formatting |
 | Styling | `frontend/app/globals.css`, `frontend/postcss.config.mjs` | Tailwind 4, light/dark CSS variables and terminal-style visual components |
@@ -282,6 +284,14 @@ The API verifies ownership, unlinks the filesystem entry, then transactionally d
 
 Filesystem changes and PostgreSQL commits cannot form one shared transaction. A crash after unlink but before the database commit can leave metadata for missing content; retrying deletion can finish that operation. A crash during upload can leave an orphan file or reservation. The project has documented offline recovery, not an automatic background reconciler.
 
+### Selected-file backup download
+
+The home dashboard and Files page expose **Back up files**. The browser searches the authenticated user's files across folders, keeps selections across pages, and submits their UUIDs to `GET /api/files/backup?ids=...`. The backend authenticates the request, requires 1–100 unique UUIDs, loads every row with `userId` ownership filtering, and rejects the request if any selected row is unavailable. It limits exports to five requests per minute per route and two simultaneous exports per backend process.
+
+The server opens each UUID storage object through the existing `O_NOFOLLOW` local-storage adapter, then streams a ZIP64 archive directly to the response. Entries use `files/<file-id>/<sanitized-name>`, so duplicate names cannot overwrite one another and original names never become filesystem paths. The archive is stored without compression to reduce CPU and memory pressure. `manifest.json` records the export format, timestamp, count, total bytes, original names, folders, sizes, timestamps and SHA-256 digest of every streamed file. No export archive is retained on the server, and the export does not change quota or pause the application.
+
+This browser export is a user file copy only. It contains no PostgreSQL dump, sessions, credentials or other users' data and cannot be passed to the administrator restore scripts. A download interrupted by the browser or tunnel must be retried; it is not resumable. Full coordinated database plus filesystem recovery remains the root-only workflow in [BACKUP_RESTORE.md](deploy/BACKUP_RESTORE.md).
+
 ## 8. Database and quota reporting
 
 [Prisma schema](backend/prisma/schema.prisma) defines four current models:
@@ -315,6 +325,7 @@ All routes below require a session except register, login and health.
 | GET | `/api/auth/me` | Return authenticated user snapshot |
 | POST | `/api/files/upload` | Stream and commit one file |
 | GET | `/api/files` | Owner-scoped list/search/filter/sort/page |
+| GET | `/api/files/backup?ids=...` | Stream an authenticated user's selected files as a ZIP export |
 | GET | `/api/files/:id` | File metadata and folder summary |
 | GET | `/api/files/:id/download` | Attachment stream |
 | PATCH | `/api/files/:id` | Move file to another owned folder |
@@ -326,6 +337,11 @@ All routes below require a session except register, login and health.
 | DELETE | `/api/folders/:id` | Delete empty non-root folder |
 | GET | `/api/storage` | Usage and counts |
 | POST | `/api/storage/recalculate` | Rebuild current user's usage from metadata |
+| POST | `/api/files/:id/shares` | Create an expiring/download-limited public share token |
+| GET | `/api/files/:id/shares` | List share links owned by the current user |
+| DELETE | `/api/shares/:shareId` | Revoke an owned share link |
+| GET | `/api/shares/:token` | View metadata for an available public share |
+| GET | `/api/shares/:token/download` | Rate-limited public shared-file stream |
 | GET | `/health` | Basic API status and Redis client state |
 
 ## 10. Docker configuration available in the repository
@@ -508,6 +524,36 @@ mounts host runtime/kernel/Docker paths; Node Exporter uses host PID visibility 
 a read-only host filesystem mount. Monitoring ports bind to loopback and are not
 published through Nginx, except Grafana. This is a single-host deployment without
 replication or failover.
+
+## Security review and trust boundaries
+
+The inspected source and deployment files provide these controls:
+
+| Area | Current control | Boundary or limitation |
+| --- | --- | --- |
+| Authentication | Argon2id password hashes; random 32-byte sessions; only SHA-256 token hashes in PostgreSQL; HttpOnly/SameSite cookies and Secure cookies in production | Session cookies are bearer credentials; HTTPS must be provided by Cloudflare or another trusted proxy |
+| Authorization | Authenticated routes scope files, folders, shares and metadata by `userId`; public shares expose only a random token and selected file | Share URLs intentionally bypass login until revoked, expired or exhausted |
+| Input validation | Zod validates route params, query/body fields, UUID/CUID formats, names, sizes, MIME categories, share tokens and pagination | MIME type is client-declared; magic-byte inspection and malware scanning are not implemented |
+| Upload safety | Fixed 5 GiB per-user quota; atomic `storageUsed + storageReserved` admission; exact byte verification; UUID keys; `O_EXCL`, `O_NOFOLLOW` and mode 0600 | Database metadata and filesystem writes are separate transactions; offline reconciliation remains operational work |
+| Export safety | Ownership check for every requested ID; maximum 100 files; route rate limit; ZIP paths include file IDs and sanitized names; manifest hashes streamed bytes; no server-side export retention | ZIP download is not resumable and contains selected plaintext files |
+| Path safety | Storage keys accept only UUID v4 values; storage root rejects symlink resolution; backup archive validation rejects traversal, links and special files | Existing host directory ownership and mode must be checked during deployment |
+| Browser/API boundary | Helmet, credentialed CORS policy, origin checks on state-changing requests, relative `/api` frontend base, Nginx private caching disabled | `FRONTEND_ORIGIN=*` reflects valid HTTP(S) origins; use an explicit origin list when the public hostname is stable |
+| Abuse controls | Login, registration, share inspection/download and personal export routes have rate limits; Redis supports counters in this deployment | No WAF, account lockout, MFA or external abuse service is configured |
+| Secrets and logs | Runtime secret files are ignored by Git; logs redact cookies, authorization, passwords, URLs and request bodies; PostgreSQL exporter uses a monitor role | Secret rotation and host disk encryption are operator responsibilities |
+| Container hardening | App/monitor containers use dropped capabilities or `no-new-privileges`; app runs as configurable non-root UID/GID; internal services bind localhost | cAdvisor is privileged and Alloy can inspect Docker through a read-only socket; host networking exposes app ports directly on the host |
+| Monitoring privacy | JSON access logs use route templates/categories; Alloy filters sensitive fields; metrics avoid user IDs and filenames; database statement logging is disabled | Third-party container output and host-level Docker access remain privileged operational data |
+| Recovery | Root-only scripts validate checksums, PostgreSQL dump format, archive metadata and ownership; restore requires exact typed confirmation and creates a recovery snapshot | Database/filesystem restore is not atomic across resources; hard power loss can require manual recovery |
+
+Installation security checks still required on the Ubuntu host:
+
+1. Set unique random `AUTH_SECRET`, database, Grafana and WhatsApp secrets outside Git; verify runtime files are not world-readable.
+2. Keep `/srv/secure-cloud-storage` and the backup directory protected, owned by the intended accounts, with no unexpected symlinks or mounts.
+3. Expose only Nginx/Cloudflare publicly. Confirm application, database, Redis, exporter and monitoring ports remain loopback/firewall-protected as configured.
+4. Prefer an explicit HTTPS `FRONTEND_ORIGIN` after the Cloudflare hostname is stable; set `GRAFANA_COOKIE_SECURE=true` for HTTPS-only Grafana.
+5. Run `docker compose config --quiet`, inspect container users/mounts/capabilities, and verify `/health`, Prometheus targets, Loki ingestion and Grafana login after deployment.
+6. Verify a backup and perform a restore drill on a separate copy before relying on recovery. Keep recovery snapshots outside the application storage directory.
+
+This review did not claim these host checks were performed live. It found no AWS/S3/EC2 runtime dependency in the checked-in application path; `infra/ec2.tf` is an empty placeholder.
 
 ## 15. Cloudflare and WhatsApp lifecycle
 
