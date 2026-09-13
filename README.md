@@ -8,7 +8,7 @@ For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions 
 
 For the full configured infrastructure, ports, persistence and request flows (updated 12 September 2026), see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
 
-For mobile access through Cloudflare, see [Nginx and Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md). The browser now uses same-origin `/api`; Nginx listens on port 8080.
+For the production two-machine topology, see [split EC2/Ubuntu deployment](deploy/SPLIT_DEPLOYMENT.md). The browser uses same-origin `/api`; EC2 Nginx sends private API traffic over Tailscale to Ubuntu. The older [Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md) is for development/legacy operation only.
 
 ## Current runtime and access
 
@@ -31,11 +31,11 @@ The current Compose project manages the app, proxy, databases and monitoring. Co
 docker compose ps -a
 docker compose up -d --build --wait --wait-timeout 120
 
-# Keep this command running for phone/public access.
-cloudflared tunnel --url http://localhost:8080
+# Production uses the split EC2/Ubuntu deployment documented below.
+# The legacy single-host stack can still be checked locally at http://localhost:8080.
 ```
 
-Open the generated HTTPS URL on your phone and sign in. The browser uses `/api`, so it never tries to reach `localhost:4000` on the phone. `FRONTEND_ORIGIN=*` accepts valid HTTP(S) origins using credential-compatible origin reflection. Nginx routes `/api/*` to Fastify and other requests to Next.js. The native tunnel command is outside Compose; the optional `tunnel` profile provides a managed equivalent with centralized logs. Its temporary hostname changes across runs.
+For production, follow [split EC2/Ubuntu deployment](deploy/SPLIT_DEPLOYMENT.md): a named Cloudflare Tunnel terminates at EC2 Nginx, while `/api/*` travels over Tailscale to Ubuntu Nginx and Fastify. The browser remains same-origin and the backend uses an explicit `FRONTEND_ORIGIN`. Quick Tunnel commands are retained only for development/legacy use.
 
 Do not also start `npm run dev` while the app containers own ports 3000/4000. To use development mode instead, stop the application containers with `docker compose stop nginx frontend backend`, keep the Compose PostgreSQL/Redis services running, install workspace dependencies, and run:
 

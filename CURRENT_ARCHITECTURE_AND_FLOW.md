@@ -26,6 +26,12 @@ The browser uses the relative API base `/api`, so mobile requests stay on the sa
 
 ## 2. Full infrastructure inventory
 
+The repository now contains two production deployment boundaries in
+[`deploy/SPLIT_DEPLOYMENT.md`](deploy/SPLIT_DEPLOYMENT.md). The original root
+Compose file remains a single-host rollback/development stack; the split files are
+the production topology requested for EC2 plus the Ubuntu data plane. They do not
+include the monitoring Compose file, so monitoring is opt-in.
+
 The Ubuntu laptop is the application, database and storage server. Root
 [compose.yaml](compose.yaml) includes [monitoring/compose.yaml](monitoring/compose.yaml)
 under project `secure-cloud`: **15 default services** (including the one-shot

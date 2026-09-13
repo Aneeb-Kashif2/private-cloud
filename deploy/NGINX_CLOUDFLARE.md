@@ -1,6 +1,11 @@
 # Nginx and mobile access through Cloudflare Quick Tunnel
 
-Your command `cloudflared tunnel --url http://localhost:3000` creates a **Quick Tunnel**, not DNS proxying with router port forwarding. Cloudflare supplies a temporary HTTPS hostname. For the Nginx setup, use:
+This document describes the legacy single-host development path. Production must use
+the named Cloudflare Tunnel on EC2 described in [Split deployment](SPLIT_DEPLOYMENT.md);
+it must not depend on a random `trycloudflare.com` hostname or run cloudflared on the
+Ubuntu storage server.
+
+Your command `cloudflared tunnel --url http://localhost:3000` creates a **Quick Tunnel**, not DNS proxying with router port forwarding. Cloudflare supplies a temporary HTTPS hostname. For the legacy Nginx setup, use:
 
 ```bash
 cloudflared tunnel --url http://localhost:8080

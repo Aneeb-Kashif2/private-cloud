@@ -1,0 +1,66 @@
+name: Secure-Cloud split deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        type: boolean
+        default: false
+        description: Deploy the backend to the Ubuntu runner
+      deploy_frontend:
+        type: boolean
+        default: false
+        description: Deploy the frontend to the EC2 runner
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  ubuntu:
+    if: inputs.deploy_backend
+    runs-on: [self-hosted, Linux, X64, secure-cloud-ubuntu]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy Ubuntu data plane
+        env:
+          BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend:${{ github.sha }}
+          APP_ENV_FILE: /etc/secure-cloud/ubuntu/backend.env
+          POSTGRES_ENV_FILE: /etc/secure-cloud/ubuntu/postgres.env
+        run: |
+          set -euo pipefail
+          test -r "$APP_ENV_FILE" -a -r "$POSTGRES_ENV_FILE" -a -d /srv/secure-cloud-storage
+          docker compose -f deploy/ubuntu/docker-compose.yml config --quiet
+          docker compose -f deploy/ubuntu/docker-compose.yml pull backend
+          docker compose -f deploy/ubuntu/docker-compose.yml run --rm migrate
+          docker compose -f deploy/ubuntu/docker-compose.yml up -d backend nginx
+
+  ec2:
+    if: inputs.deploy_frontend
+    runs-on: [self-hosted, Linux, X64, secure-cloud-ec2]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy EC2 edge
+        env:
+          FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
+          EC2_ENV_FILE: /etc/secure-cloud/ec2/.env
+        run: |
+          set -euo pipefail
+          test -r "$EC2_ENV_FILE"
+          docker compose -f deploy/ec2/docker-compose.yml config --quiet
+          docker compose -f deploy/ec2/docker-compose.yml pull frontend
+          docker compose -f deploy/ec2/docker-compose.yml up -d frontend nginx

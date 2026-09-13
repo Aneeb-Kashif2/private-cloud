@@ -1,0 +1,56 @@
+name: secure-cloud-ec2
+
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE:-secure-cloud-frontend:local}
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    env_file:
+      - ${EC2_ENV_FILE:-./.env}
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    network_mode: host
+    restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:stable-alpine
+    network_mode: host
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      UBUNTU_TAILSCALE_HOST: ${UBUNTU_TAILSCALE_HOST:?Set the Ubuntu MagicDNS hostname}
+    depends_on:
+      frontend: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.0
+    profiles: [cloudflare]
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    secrets: [cloudflare_tunnel_token]
+    depends_on:
+      nginx: {condition: service_healthy}
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?Set the local named tunnel token file}

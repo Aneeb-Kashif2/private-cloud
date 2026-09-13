@@ -35,7 +35,12 @@ docker compose logs --tail=100 nginx backend frontend migrate
 
 The migration container must succeed before the API starts; the frontend waits for API health, and Nginx waits for both application containers. The API drains in-flight requests on shutdown; Compose allows up to five minutes before forcing it to stop. Schedule deployments outside long uploads, and follow the main README recovery procedure after a forced shutdown. Both application containers run without root privileges. The storage bind mount refuses to create a missing host directory. UID/GID must match the existing file owner. Keep the same exported settings for subsequent Compose commands, or provide them through your local `.env` (never commit credentials).
 
-Nginx is included on port 8080 with `/api/` routed to `127.0.0.1:4000` and other paths to `127.0.0.1:3000`. It allows 5 GiB bodies and streams API traffic without request buffering or proxy caching. The current mobile-access method is `cloudflared tunnel --url http://localhost:8080`: Cloudflare supplies public HTTPS, while Nginx receives local HTTP. No tunnel process was running in the latest runtime snapshot; Compose does not start one automatically.
+The legacy single-host Nginx is included on port 8080 with `/api/` routed to
+`127.0.0.1:4000` and other paths to `127.0.0.1:3000`. The production deployment
+uses the separate [EC2/Ubuntu topology](SPLIT_DEPLOYMENT.md): EC2 Nginx serves
+Next.js and proxies `/api/` over Tailscale to Ubuntu Nginx. Use a named Cloudflare
+Tunnel on EC2 for production; Quick Tunnel commands below are development/legacy
+only.
 
 Production cookies require the HTTPS access flow. The browser API base defaults to `/api`, so the temporary tunnel hostname does not require rebuilding images. An explicit API URL override is baked into the frontend and would require a rebuild to change. Cloudflare's own request-size limits still apply. Do not expose the uploaded-file directory as web content.
 
