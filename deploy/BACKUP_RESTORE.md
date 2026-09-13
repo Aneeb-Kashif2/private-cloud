@@ -246,3 +246,37 @@ relying on these artifacts for disaster recovery.
 References: [PostgreSQL pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html),
 [PostgreSQL pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html),
 [GNU tar metadata options](https://www.gnu.org/software/tar/manual/tar.html).
+
+## Download selected files from the home screen
+
+On the dashboard or Files page, choose **Back up files**, select files, then choose
+**Download backup**. The picker searches across all your folders and retains selections
+across pages. Select up to 100 files per download; use multiple downloads for more files.
+The browser saves `secure-cloud-files-YYYY-MM-DD.zip` on the device you are using.
+Check the browser download manager for completion. Authentication or unavailable-file
+errors are displayed in the new tab; interrupted downloads must be retried.
+
+The authenticated `GET /api/files/backup?ids=...` endpoint checks ownership of every
+requested file before streaming. ZIP64 supports archives larger than 4 GiB. Files
+are streamed without compression to keep CPU and memory use low; no export archive
+is retained on the server and storage quota is unchanged. At most two exports can
+run per backend process, with one per user. The endpoint also limits request frequency.
+Existing Nginx API routing already disables buffering.
+
+Each file is stored under `files/<file-id>/<safe-name>` to avoid duplicate names and
+unsafe extraction paths. `manifest.json` records original names, folder metadata,
+file sizes, timestamps, and SHA-256 checksums of the exported bytes. Extract the ZIP
+with a ZIP64-compatible archive tool and compare files with the manifest checksums
+when checking integrity. To put these files back into Secure Cloud, upload the extracted
+files into the desired folders using the normal upload flow and quota rules.
+
+This personal file export contains no database dump, credentials, or other users'
+files. It is a separate format from administrator backups and cannot be passed to
+`scripts/restore.sh` or `scripts/verify-backup.sh`. It does not pause the application;
+selected files are opened before sending the download, and missing files reject the
+request. Full coordinated database/filesystem recovery continues to use the scripts
+above. No browser endpoint executes privileged backup/restore commands.
+
+ZIP streaming uses [Archiver](https://www.archiverjs.com/docs/archiver/). Keep the
+browser connection open until the download completes, particularly for large archives
+through Cloudflare. The download is not resumable; retry interrupted transfers.

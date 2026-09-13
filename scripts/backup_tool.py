@@ -420,11 +420,16 @@ def main():
                 ops.restore(Path(args.directory).absolute())
             success = True
     finally:
-        ops.resume()
-        if args.operation == 'backup':
-            ops.metrics(success)
-        if ops.unsafe_to_resume:
-            log('restore_recovery_required', backend_left_stopped=True)
+        try:
+            ops.resume()
+        except BaseException:
+            success = False
+            raise
+        finally:
+            if args.operation == 'backup':
+                ops.metrics(success)
+            if ops.unsafe_to_resume:
+                log('restore_recovery_required', backend_left_stopped=True)
 
 if __name__ == '__main__':
     try:

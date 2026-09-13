@@ -120,3 +120,11 @@ sudo bash scripts/restore.sh /srv/secure-cloud-backups/<backup-directory>
 See [backup and restore operations](deploy/BACKUP_RESTORE.md) for retention,
 permissions, manifest/checksum verification, failure recovery, daily systemd
 scheduling and backup metrics. Scheduling is supplied but not enabled automatically.
+
+### Download a personal file backup
+
+On the home dashboard or Files page, click **Back up files**, select the files you
+want (up to 100 per archive), then click **Download backup**. Your browser downloads
+a ZIP containing those files and a SHA-256 manifest. Selections can span folders
+and pages. See [backup operations](deploy/BACKUP_RESTORE.md#download-selected-files-from-the-home-screen)
+for extraction, limits, and the separate administrator restore workflow.

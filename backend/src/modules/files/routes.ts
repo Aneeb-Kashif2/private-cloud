@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createFileBackup } from "../../lib/file-backup.js";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
@@ -9,6 +10,37 @@ const allowedMime = /^(image\/|video\/|audio\/|text\/|application\/(pdf|zip|gzip
 const idParams = z.object({ id: z.string().uuid() });
 
 const routes: FastifyPluginAsync = async app => {
+  const activeBackups = new Set<string>();
+  app.get("/backup", { preHandler: app.authenticate, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const query = z.object({ ids: z.string().max(3699).transform(value => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)) }).parse(request.query);
+    const ids = [...new Set(query.ids)];
+    if (activeBackups.has(request.user.id) || activeBackups.size >= 2) throw new AppError(429, "Another backup is running. Try again shortly.", "BACKUP_BUSY");
+    activeBackups.add(request.user.id);
+    let abort: (() => void) | undefined;
+    let released = false;
+    const cleanup = () => {
+      abort?.();
+      if (!released) { activeBackups.delete(request.user.id); released = true; }
+    };
+    reply.raw.once("close", cleanup);
+    try {
+      const files = await app.prisma.file.findMany({ where: { id: { in: ids }, userId: request.user.id }, include: { folder: { select: { id: true, name: true } } } });
+      if (files.length !== ids.length) throw new AppError(404, "One or more selected files are unavailable. Refresh your selection.", "NOT_FOUND");
+      const backup = await createFileBackup(files, app.storage);
+      abort = backup.abort;
+      if (reply.raw.destroyed) { cleanup(); return reply; }
+      reply.header("Content-Disposition", `attachment; filename="secure-cloud-files-${new Date().toISOString().slice(0, 10)}.zip"`)
+        .header("Cache-Control", "private, no-store").header("X-Accel-Buffering", "no").type("application/zip");
+      // Send before finalization: backpressure goes straight to the browser.
+      reply.send(backup.archive);
+      void backup.start().catch(error => backup.archive.destroy(error));
+      return reply;
+    } catch (error) {
+      cleanup();
+      reply.raw.removeListener("close", cleanup);
+      throw error;
+    }
+  });
   // Pass binary bodies through without buffering them in memory.
   app.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));
   app.post("/upload", { onRequest: app.authenticate }, async (request, reply) => {
