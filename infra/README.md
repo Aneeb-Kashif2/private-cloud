@@ -27,7 +27,8 @@ Cloudflare tokens, database credentials or application secrets.
 ```bash
 cd infra
 cp terraform.tfvars.example terraform.tfvars
-# Edit region, instance type, key name and restricted SSH CIDRs if needed.
+# Edit region, instance type and restricted SSH CIDRs if needed.
+# Put only your OpenSSH public key in ssh_public_key; keep the private key on Ubuntu.
 terraform init
 terraform fmt -check
 terraform validate
@@ -52,8 +53,9 @@ only when you provide another private egress path.
    `CLOUDFLARE_TUNNEL_TOKEN_FILE`.
 4. Deploy the EC2 frontend/Nginx stack from `deploy/ec2` and the Ubuntu data-plane
    stack from `deploy/ubuntu`.
-5. Verify the private health path from EC2, then verify the public hostname. Do not
-   expose Ubuntu's PostgreSQL, Redis or Fastify listeners through AWS security groups,
+5. Connect with the private key from Ubuntu, for example
+   `ssh -i ~/secure ec2-user@<EC2_PUBLIC_IP>`. Verify the private health path from
+   EC2, then verify the public hostname. Do not expose Ubuntu's PostgreSQL, Redis or Fastify listeners through AWS security groups,
    router forwarding or Cloudflare.
 
 ## Destroy

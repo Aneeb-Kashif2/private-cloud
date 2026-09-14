@@ -1,10 +1,16 @@
+resource "aws_key_pair" "edge" {
+  count      = var.ssh_public_key != "" ? 1 : 0
+  key_name   = var.ssh_key_pair_name
+  public_key = var.ssh_public_key
+}
+
 resource "aws_instance" "edge" {
   ami                         = data.aws_ami.amazon_linux.id
   instance_type               = var.instance_type
   subnet_id                   = aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.edge.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2.name
-  key_name                    = var.ssh_key_name != "" ? var.ssh_key_name : null
+  key_name                    = var.ssh_public_key != "" ? aws_key_pair.edge[0].key_name : (var.ssh_key_name != "" ? var.ssh_key_name : null)
   associate_public_ip_address = var.assign_public_ip
 
   user_data = templatefile("${path.module}/user-data.sh.tftpl", {

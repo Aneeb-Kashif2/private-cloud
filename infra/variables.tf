@@ -48,9 +48,19 @@ variable "ssh_key_name" {
   default     = ""
   description = "Existing EC2 key pair; empty disables SSH key injection."
 }
+variable "ssh_public_key" {
+  type        = string
+  default     = ""
+  description = "OpenSSH public key used to create the EC2 key pair. Never provide the private key."
+}
+variable "ssh_key_pair_name" {
+  type        = string
+  default     = "secure-cloud-edge"
+  description = "AWS key-pair name created when ssh_public_key is supplied."
+}
 variable "ssh_allowed_cidrs" {
   type        = list(string)
-  default     = []
+  default     = ["203.99.54.234/32"]
   description = "Trusted SSH CIDRs; empty disables SSH ingress."
 }
 variable "assign_public_ip" {
