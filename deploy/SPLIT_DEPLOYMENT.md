@@ -118,6 +118,14 @@ docker compose --env-file deploy/ec2/.env -f deploy/ec2/docker-compose.yml up -d
 
 The optional split deployment workflow is `.github/workflows/deploy-split.yml`. It expects separate self-hosted runner labels and pre-provisioned environment files; it does not copy secrets between machines. The existing monolithic workflow remains available for rollback until the split hosts are accepted.
 
+The EC2 Terraform module deliberately does not attach a new EC2 key pair to the
+existing instance, because AWS makes that attribute replacement-sensitive. When
+`ssh_public_key` is supplied, Terraform uses the existing SSM IAM role and an SSM
+association to install the public key in `ec2-user` without replacing the edge host.
+Keep the matching private key on Ubuntu and use the restricted `/32` security-group
+rule. If SSM is unavailable, fix SSM connectivity first rather than replacing the
+production edge instance.
+
 ## Optional monitoring
 
 Do not include `monitoring/compose.yaml` from either production application Compose file. If monitoring is needed, run it independently on Ubuntu with its prepared runtime secrets, or on a dedicated monitoring host. Its exporters must target private Ubuntu services and Grafana must remain protected. Monitoring is not required for application startup.

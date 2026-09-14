@@ -16,6 +16,8 @@ Resources created:
 - IAM instance role with SSM management; CloudWatch agent policy/log group are optional.
 - Bootstrap installation of Docker, Git, curl, cloudflared and Tailscale. It does not
   join a tailnet unless an optional short-lived auth key is supplied.
+- Optional SSM association that installs the supplied public SSH key into `ec2-user`
+  without replacing the existing instance. The private key never enters Terraform.
 
 ## Safe use
 
@@ -53,7 +55,7 @@ only when you provide another private egress path.
    `CLOUDFLARE_TUNNEL_TOKEN_FILE`.
 4. Deploy the EC2 frontend/Nginx stack from `deploy/ec2` and the Ubuntu data-plane
    stack from `deploy/ubuntu`.
-5. Connect with the private key from Ubuntu, for example
+5. After SSM reports success, connect with the private key from Ubuntu, for example
    `ssh -i ~/secure ec2-user@<EC2_PUBLIC_IP>`. Verify the private health path from
    EC2, then verify the public hostname. Do not expose Ubuntu's PostgreSQL, Redis or Fastify listeners through AWS security groups,
    router forwarding or Cloudflare.

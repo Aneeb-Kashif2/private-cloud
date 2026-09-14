@@ -51,12 +51,17 @@ variable "ssh_key_name" {
 variable "ssh_public_key" {
   type        = string
   default     = ""
-  description = "OpenSSH public key used to create the EC2 key pair. Never provide the private key."
+  description = "OpenSSH public key installed through SSM without replacing the existing instance. Never provide the private key."
 }
-variable "ssh_key_pair_name" {
+variable "ssh_user" {
   type        = string
-  default     = "secure-cloud-edge"
-  description = "AWS key-pair name created when ssh_public_key is supplied."
+  default     = "ec2-user"
+  description = "Linux user whose authorized_keys receives the public key."
+}
+variable "install_ssh_key_via_ssm" {
+  type        = bool
+  default     = true
+  description = "Install ssh_public_key through the existing SSM-managed instance without replacement."
 }
 variable "ssh_allowed_cidrs" {
   type        = list(string)
