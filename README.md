@@ -10,6 +10,8 @@ For the full configured infrastructure, ports, persistence and request flows (up
 
 For the production two-machine topology, see [split EC2/Ubuntu deployment](deploy/SPLIT_DEPLOYMENT.md). The browser uses same-origin `/api`; EC2 Nginx sends private API traffic over Tailscale to Ubuntu. The older [Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md) is for development/legacy operation only.
 
+The optional AWS edge VPC/EC2/IAM/CloudWatch Terraform is documented in [infra/README.md](infra/README.md). It provisions only the EC2 frontend edge; PostgreSQL, Redis, Fastify and `/srv/secure-cloud-storage` remain on Ubuntu.
+
 ## Current runtime and access
 
 The configured topology below includes the application and databases; monitoring and WhatsApp are covered in the [full architecture](CURRENT_ARCHITECTURE_AND_FLOW.md). Current container health and public tunnel availability were not rechecked during the 12 September documentation update. There is no `install.sh` yet; complete the existing deployment/monitoring setup before starting Compose.

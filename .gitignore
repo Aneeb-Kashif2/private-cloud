@@ -57,4 +57,11 @@ monitoring/runtime/
 # Quick Tunnel runtime state and logs; never commit.
 .runtime/
 
+# Terraform state, plans and provider cache.
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/terraform.tfvars
+
 !deploy/backup.env.example

@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee -a /var/log/secure-cloud-bootstrap.log | logger -t secure-cloud-bootstrap -s 2>/dev/console) 2>&1
+
+dnf update -y
+dnf install -y docker git curl ca-certificates jq
+systemctl enable --now docker
+
+# Install clients only. Tunnel credentials and application secrets are supplied
+# later through protected deployment files or AWS Systems Manager.
+curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.rpm -o /tmp/cloudflared.rpm
+dnf install -y /tmp/cloudflared.rpm
+rm -f /tmp/cloudflared.rpm
+curl -fsSL https://pkgs.tailscale.com/stable/amazon-linux/2023/tailscale.repo -o /etc/yum.repos.d/tailscale.repo
+dnf install -y tailscale
+systemctl enable --now tailscaled
+%{ if tailscale_auth_key != "" ~}
+tailscale up --auth-key='${tailscale_auth_key}' --hostname='${tailscale_hostname}' --ssh=false
+%{ endif ~}
+
+install -d -m 0750 /etc/secure-cloud/ec2
+cat >/etc/secure-cloud/ec2/README <<'EOF'
+This host is the Secure Cloud EC2 edge. Deploy the frontend and Nginx from
+deploy/ec2/docker-compose.yml. Keep the Cloudflare named-tunnel token in a
+separate mode-0600 file. Backend/database/Redis/storage secrets belong on Ubuntu.
+EOF
+chmod 0640 /etc/secure-cloud/ec2/README
+
+%{ if enable_cloudwatch ~}
+dnf install -y amazon-cloudwatch-agent
+%{ endif ~}

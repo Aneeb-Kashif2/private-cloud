@@ -37,7 +37,8 @@ The Ubuntu laptop is the application, database and storage server. Root
 under project `secure-cloud`: **15 default services** (including the one-shot
 migration job), plus optional `cloudflared` under profile `tunnel`. Native
 WhatsApp/tunnel scripts run outside Docker. No AWS, S3, EC2, Kubernetes or external
-object storage is provisioned. `infra/ec2.tf` is an empty placeholder.
+object storage is provisioned. The optional AWS edge module under `infra/` provisions
+only VPC/EC2/IAM/CloudWatch resources; it does not provision S3 or the Ubuntu data plane.
 
 | Service | Configured image/runtime | Listener / exposure | Responsibility |
 | --- | --- | --- | --- |
@@ -137,7 +138,7 @@ Secure Cloud sessions do not authenticate it.
 | Deployment | [compose.yaml](compose.yaml), both workspace Dockerfiles, [deploy/README.md](deploy/README.md) | Application containers, migrations and deployment instructions |
 | Automation | [pipeline.yml](.github/workflows/pipeline.yml), `.github/dependabot.yml` | CI, image publication, optional deployment and dependency-update configuration |
 | Tests | `backend/test/`, [scripts/smoke-containers.sh](scripts/smoke-containers.sh), [scripts/smoke-http.mjs](scripts/smoke-http.mjs) | Filesystem, API/database and actual-container checks |
-| Infrastructure placeholder | `infra/ec2.tf` | Empty, zero-byte file; it provisions no infrastructure |
+| AWS edge infrastructure | `infra/` | Optional Terraform VPC, EC2 edge, IAM role and CloudWatch resources; no data plane |
 
 ## 4. Startup and request handling
 
@@ -559,7 +560,9 @@ Installation security checks still required on the Ubuntu host:
 5. Run `docker compose config --quiet`, inspect container users/mounts/capabilities, and verify `/health`, Prometheus targets, Loki ingestion and Grafana login after deployment.
 6. Verify a backup and perform a restore drill on a separate copy before relying on recovery. Keep recovery snapshots outside the application storage directory.
 
-This review did not claim these host checks were performed live. It found no AWS/S3/EC2 runtime dependency in the checked-in application path; `infra/ec2.tf` is an empty placeholder.
+This review did not claim these host checks were performed live. AWS Terraform now
+exists for the optional EC2 edge; it does not provision S3, PostgreSQL, Redis, Fastify
+or the Ubuntu storage filesystem. The application remains local-filesystem based.
 
 ## 15. Cloudflare and WhatsApp lifecycle
 
