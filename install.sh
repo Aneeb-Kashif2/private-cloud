@@ -2,6 +2,28 @@
 # Ubuntu single-host installer. Never removes persistent data or replaces .env files.
 set -Eeuo pipefail
 umask 077
+
+# Supports: curl -fsSL https://raw.githubusercontent.com/Aneeb-Kashif2/private-cloud/main/install.sh | bash
+# The bootstrap only obtains source code; the normal installer below performs all setup.
+if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
+  repo_url=${SECURE_CLOUD_REPO:-https://github.com/Aneeb-Kashif2/private-cloud.git}
+  repo_ref=${SECURE_CLOUD_REF:-main}
+  install_dir=${SECURE_CLOUD_DIR:-/opt/secure-cloud}
+  bootstrap_sudo=()
+  (( EUID == 0 )) || bootstrap_sudo=(sudo)
+  if ! command -v git >/dev/null 2>&1; then
+    "${bootstrap_sudo[@]}" apt-get update
+    "${bootstrap_sudo[@]}" apt-get install -y git
+  fi
+  if [[ -e "$install_dir" && ! -d "$install_dir/.git" ]]; then
+    echo "$install_dir exists and is not a Secure Cloud checkout; set SECURE_CLOUD_DIR to another path." >&2
+    exit 1
+  fi
+  if [[ ! -d "$install_dir/.git" ]]; then
+    "${bootstrap_sudo[@]}" git clone --branch "$repo_ref" --depth 1 "$repo_url" "$install_dir"
+  fi
+  exec "${bootstrap_sudo[@]}" bash "$install_dir/install.sh" "${@:-}"
+fi
 cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 mode=${1:-install}
 case "$mode" in

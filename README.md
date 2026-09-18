@@ -10,6 +10,14 @@ Download or clone this repository, open its directory, and run:
 bash install.sh
 ```
 
+For a new Ubuntu server with no checkout, run the same installer directly from GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aneeb-Kashif2/private-cloud/main/install.sh | bash
+```
+
+This bootstrap installs Git if needed, clones the selected revision into `/opt/secure-cloud`, and runs the installer there. Set `SECURE_CLOUD_DIR` to choose another directory or `SECURE_CLOUD_REF` to select a tag/branch. The repository URL can be overridden with `SECURE_CLOUD_REPO` for a private mirror; private repositories must already be accessible to Git on the server.
+
 Open **http://localhost:8080** after the installer reports success. It asks for your Ubuntu sudo password when needed, installs missing Docker/Compose, Git, curl and Python 3, prepares local storage, generates random authentication/database secrets for a fresh installation, builds the application, runs Prisma migrations, and waits for container health checks. Node.js is built inside Docker; you do not need to install it on the host. Internet access and available ports 3000, 4000, 4001, 5432, 6379, 8080 and 8082 are required. Missing Docker is installed using [Docker's official Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/).
 
 This command installs the **single Ubuntu host** deployment. The separate [EC2/Ubuntu production deployment](deploy/SPLIT_DEPLOYMENT.md) still requires its documented Tailscale, named Cloudflare Tunnel and HTTPS setup. The installer does not provision AWS or a public domain. Fresh installations allow explicit localhost browser origins; configure your HTTPS `FRONTEND_ORIGIN` for remote access.
