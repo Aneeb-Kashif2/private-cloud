@@ -1,6 +1,30 @@
 # Secure-Cloud
 
-Current monitoring and infrastructure: [monitoring/README.md](monitoring/README.md). Compose now includes Prometheus, Grafana, Loki, Alloy, host/container/service exporters and the existing databases (preserving their volumes). Grafana is served at `/grafana/`; monitoring and database ports bind only to localhost. Complete the documented one-time setup before starting this version.
+Current monitoring and infrastructure: [monitoring/README.md](monitoring/README.md). Compose includes Prometheus, Grafana, Loki, Alloy, host/container/service exporters and the existing databases. The installer starts only the application and databases. To enable monitoring and Grafana at `/grafana/`, complete the separate monitoring setup.
+
+## One-command installation on Ubuntu
+
+Download or clone this repository, open its directory, and run:
+
+```bash
+bash install.sh
+```
+
+Open **http://localhost:8080** after the installer reports success. It asks for your Ubuntu sudo password when needed, installs missing Docker/Compose, Git, curl and Python 3, prepares local storage, generates random authentication/database secrets for a fresh installation, builds the application, runs Prisma migrations, and waits for container health checks. Node.js is built inside Docker; you do not need to install it on the host. Internet access and available ports 3000, 4000, 4001, 5432, 6379, 8080 and 8082 are required. Missing Docker is installed using [Docker's official Ubuntu repository](https://docs.docker.com/engine/install/ubuntu/).
+
+This command installs the **single Ubuntu host** deployment. The separate [EC2/Ubuntu production deployment](deploy/SPLIT_DEPLOYMENT.md) still requires its documented Tailscale, named Cloudflare Tunnel and HTTPS setup. The installer does not provision AWS or a public domain. Fresh installations allow explicit localhost browser origins; configure your HTTPS `FRONTEND_ORIGIN` for remote access.
+
+Existing `.env`, `backend/.env`, database/Redis volumes, storage files and permissions are preserved. Missing configuration files are created with mode `0600`; a new `/srv/secure-cloud-storage` directory uses `0700` and the Compose application's UID/GID (1000 by default). Existing installations with missing credentials or conflicting configuration stop with an error instead of resetting anything. `APP_ENV_FILE`, `MONITORING_RUNTIME_DIR`, `APP_UID` and `APP_GID` can be configured in the root `.env`. Back up existing data before upgrades: applying database migrations may change its schema.
+
+```bash
+bash install.sh --status       # Container status, including stopped migration jobs
+bash install.sh --update       # Rebuild the checked-out source, migrate, and restart
+bash install.sh --uninstall    # Explicit confirmation; removes app/database containers only
+```
+
+`--update` does not fetch or overwrite source code: pull your desired revision first. Uninstall retains uploaded files, all persistent volumes, configuration, Docker and any monitoring services. Running the installer again reuses those volumes. It never runs `down -v` or deletes user data.
+
+If startup fails, inspect `docker compose ps -a` and `docker compose logs --tail=100 migrate backend frontend nginx`. Prefix Docker commands with `sudo` if your account cannot access Docker. Fix the reported configuration, port or permission issue and rerun `bash install.sh`. Legacy database containers managed by a different Compose project must be adopted using the existing [monitoring setup](monitoring/README.md); the installer does not remove conflicting containers.
 
 Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cache. The Ubuntu laptop running the API is the storage server. File bytes stream to and from `/srv/secure-cloud-storage`; PostgreSQL stores only metadata, authentication and quota counters.
 
@@ -14,7 +38,7 @@ The optional AWS edge VPC/EC2/IAM/CloudWatch Terraform is documented in [infra/R
 
 ## Current runtime and access
 
-The configured topology below includes the application and databases; monitoring and WhatsApp are covered in the [full architecture](CURRENT_ARCHITECTURE_AND_FLOW.md). Current container health and public tunnel availability were not rechecked during the 12 September documentation update. There is no `install.sh` yet; complete the existing deployment/monitoring setup before starting Compose.
+The configured topology below includes the application and databases; monitoring and WhatsApp are covered in the [full architecture](CURRENT_ARCHITECTURE_AND_FLOW.md). Use the installer above for a single-host installation, or the split deployment guide for the production two-machine topology.
 
 | Service | Current runtime | Port / storage |
 | --- | --- | --- |
@@ -31,7 +55,7 @@ The current Compose project manages the app, proxy, databases and monitoring. Co
 ```bash
 # From the repository root; uses backend/.env by default.
 docker compose ps -a
-docker compose up -d --build --wait --wait-timeout 120
+bash install.sh --update
 
 # Production uses the split EC2/Ubuntu deployment documented below.
 # The legacy single-host stack can still be checked locally at http://localhost:8080.

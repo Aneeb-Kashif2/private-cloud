@@ -172,7 +172,9 @@ services:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     mem_limit: 48m
     cpus: 0.25
-    env_file: ${MONITORING_RUNTIME_DIR:-./monitoring/runtime}/postgres-exporter.env
+    env_file:
+      - path: ${MONITORING_RUNTIME_DIR:-./monitoring/runtime}/postgres-exporter.env
+        required: false # Application-only installs do not start this exporter.
     command: [--web.listen-address=127.0.0.1:9187, --no-collector.stat_statements, --no-collector.stat_activity_autovacuum]
     depends_on:
       postgres: {condition: service_healthy}
