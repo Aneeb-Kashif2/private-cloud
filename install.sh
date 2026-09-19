@@ -9,6 +9,10 @@ if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
   repo_url=${SECURE_CLOUD_REPO:-https://github.com/Aneeb-Kashif2/private-cloud.git}
   repo_ref=${SECURE_CLOUD_REF:-main}
   install_dir=${SECURE_CLOUD_DIR:-/opt/secure-cloud}
+  if [[ "$repo_url" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@:]+:[^/@]+@ ]]; then
+    echo 'SECURE_CLOUD_REPO must not contain a username, password or access token. Configure Git authentication separately.' >&2
+    exit 1
+  fi
   bootstrap_sudo=()
   (( EUID == 0 )) || bootstrap_sudo=(sudo)
   if ! command -v git >/dev/null 2>&1; then
