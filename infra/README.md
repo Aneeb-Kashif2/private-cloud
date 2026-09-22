@@ -10,8 +10,8 @@ Resources created:
 - VPC with DNS support, Internet Gateway, public subnet and public route table.
 - Optional private subnet and isolated route table reserved for future AWS-only resources.
 - EC2 edge instance using the latest Amazon Linux 2023 AMI, encrypted gp3 root disk,
-  IMDSv2 required, and no SSH ingress unless explicit trusted CIDRs are supplied.
-- Security group allowing HTTP/HTTPS and optional restricted SSH. No database, Redis,
+  IMDSv2 required, and SSH ingress limited to `ssh_allowed_cidrs`.
+- Security group allowing HTTP/HTTPS and restricted SSH. No database, Redis,
   Fastify or storage ports are opened.
 - IAM instance role with SSM management; CloudWatch agent policy/log group are optional.
 - Bootstrap installation of Docker, Git, curl, cloudflared and Tailscale. It does not
@@ -20,6 +20,11 @@ Resources created:
   without replacing the existing instance. The private key never enters Terraform.
 
 ## Safe use
+
+Set `ssh_allowed_cidrs` explicitly before applying. The checked-in default is a
+single example address, `["203.99.54.234/32"]`, so the default plan does create a
+restricted SSH ingress rule; it is used only for that rule. Use an empty list to
+disable SSH ingress entirely and `ssh_key_name = ""` to attach no key pair.
 
 Terraform state can contain sensitive values if `tailscale_auth_key` is used. Use a
 remote encrypted state backend with locking, or leave that variable empty and enroll

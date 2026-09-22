@@ -4,6 +4,12 @@ The Ubuntu laptop remains the server. Compose runs the application containers an
 
 ## Run containers on Ubuntu
 
+For a single Ubuntu host, `bash install.sh` performs the steps documented in this
+section, including configuration creation, image builds, migrations and
+health-checked startup (`bash install.sh --help` lists `--status`, `--update` and
+`--uninstall`). The manual procedure below remains the reference for custom or split
+deployments.
+
 Install Docker Engine with the Compose v2+ plugin. Follow [monitoring setup](../monitoring/README.md) to prepare credentials and adopt the original database containers before the first deployment of this version. The adoption preserves volumes and restricts ports 5432 and 6379 to localhost. A fresh host still requires database provisioning before running that existing-server setup. Back up the existing database and files before first deployment.
 
 ```bash

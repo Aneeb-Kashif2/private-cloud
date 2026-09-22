@@ -1,6 +1,6 @@
 # Secure-Cloud: current code flow and infrastructure
 
-**Source/configuration review: 13 September 2026 (PKT).** This is a checked-in architecture and security review, not a claim that every service is currently running. Runtime observations are recorded separately in [monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md). The personal file-export flow added after the previous review is included below.
+**Source/configuration review: 22 September 2026 (PKT).** This is a checked-in architecture and security review, not a claim that every service is currently running. Runtime observations are recorded separately in [monitoring implementation status](monitoring/IMPLEMENTATION_STATUS.md). The one-command installer, the public file-share links and the personal file-export flow added after earlier reviews are included below.
 
 This document describes the first-party application code, database schema, storage adapter, frontend, Docker files, tests and GitHub Actions workflow. The topology below describes the checked-in configuration, not a claim that every container or public tunnel is currently running. Dependencies and generated build output are not application source. No credentials, session tokens or user file contents are reproduced here.
 
@@ -115,6 +115,7 @@ Secure Cloud sessions do not authenticate it.
 | Area | Main files | Responsibility |
 | --- | --- | --- |
 | Workspace commands | [package.json](package.json) | Starts both development workspaces; runs builds, type-checks and backend tests |
+| Single-host installer | [install.sh](install.sh), [scripts/install-config.py](scripts/install-config.py) | Bootstrap/clone, prerequisite install, missing-config generation, secret creation, storage preparation, migration and health-checked startup; `--status`/`--update`/`--uninstall` |
 | API entry point | [backend/src/server.ts](backend/src/server.ts) | Starts listening and handles shutdown signals |
 | API composition | [backend/src/app.ts](backend/src/app.ts) | Creates services, registers security plugins, error handling and routes |
 | Configuration | [backend/src/config.ts](backend/src/config.ts) | Loads dotenv values and validates them with Zod |
@@ -129,7 +130,8 @@ Secure Cloud sessions do not authenticate it.
 | Offline maintenance | [recalculate-storage.ts](backend/src/scripts/recalculate-storage.ts) | Rebuilds usage counters from file metadata for all users |
 | Frontend shell | [frontend/components/app-shell.tsx](frontend/components/app-shell.tsx) | Navigation, session lookup, logout, mobile menu and theme |
 | Login/register | [frontend/components/auth-form.tsx](frontend/components/auth-form.tsx) | Shared form and API submission |
-| File interface | [frontend/components/file-manager.tsx](frontend/components/file-manager.tsx), [backup-button.tsx](frontend/components/backup-button.tsx) | Folder selection, upload progress, search, sorting, pagination, deletion and selected-file export |
+| File interface | [frontend/components/file-manager.tsx](frontend/components/file-manager.tsx), [backup-button.tsx](frontend/components/backup-button.tsx) | Folder selection, upload progress, search, sorting, pagination, deletion, share-link management and selected-file export |
+| Public share page | `frontend/app/share/[token]/page.tsx`, [backend/src/modules/shares/routes.ts](backend/src/modules/shares/routes.ts) | Token-scoped metadata and download without a session |
 | Personal export | [backend/src/lib/file-backup.ts](backend/src/lib/file-backup.ts), `/api/files/backup` | Streams selected owned files as a ZIP64 archive with a SHA-256 manifest |
 | Storage interface | [frontend/components/storage-summary.tsx](frontend/components/storage-summary.tsx) | Usage/count display fetched from `/api/storage` |
 | Browser networking | [frontend/lib/api.ts](frontend/lib/api.ts) | Credentialed fetch, binary upload through XHR and byte formatting |
@@ -175,6 +177,7 @@ On SIGTERM/SIGINT the API closes Fastify and its owned Prisma/Redis connections.
 | `/dashboard` | Storage summary plus file manager limited to six files per page in the selected folder |
 | `/files` | File manager with search, type filter, sorting, grid/list view and 30-file pagination |
 | `/files/:id` | Fetches metadata for one file; offers download |
+| `/share/<token>` | Public share page: loads link metadata and starts the token download; no account required |
 | `/settings` | Storage summary and static explanatory copy; no account-editing form |
 | `/trash` | Informational placeholder; there is no recoverable trash |
 
@@ -291,6 +294,12 @@ The API verifies ownership, unlinks the filesystem entry, then transactionally d
 
 Filesystem changes and PostgreSQL commits cannot form one shared transaction. A crash after unlink but before the database commit can leave metadata for missing content; retrying deletion can finish that operation. A crash during upload can leave an orphan file or reservation. The project has documented offline recovery, not an automatic background reconciler.
 
+### Public share links
+
+An owner can create a random 32-byte (43-character base64url) token for one owned file with an expiry of `1h`, `1d`, `7d` or `never` and an optional download limit of 1–10000. Only the SHA-256 hash of the token is stored; the plain token is returned once at creation. Listing and revocation are scoped by `userId`, and revocation sets `revokedAt` rather than deleting the row.
+
+`GET /api/shares/:token` returns display metadata only; it does not expose the file ID, storage key or owner. `GET /api/shares/:token/download` claims a download with a single conditional SQL update (`revokedAt IS NULL`, not expired, `downloadCount < maxDownloads`) so a limit cannot be exceeded by concurrent requests, then streams the stored bytes. Revoked, expired, exhausted and unknown tokens all return the same 404 `SHARE_UNAVAILABLE`. Both public routes are rate-limited and neither requires a session. Shares are independent of account sessions: logout and password changes do not revoke them.
+
 ### Selected-file backup download
 
 The home dashboard and Files page expose **Back up files**. The browser searches the authenticated user's files across folders, keeps selections across pages, and submits their UUIDs to `GET /api/files/backup?ids=...`. The backend authenticates the request, requires 1–100 unique UUIDs, loads every row with `userId` ownership filtering, and rejects the request if any selected row is unavailable. It limits exports to five requests per minute per route and two simultaneous exports per backend process.
@@ -301,7 +310,7 @@ This browser export is a user file copy only. It contains no PostgreSQL dump, se
 
 ## 8. Database and quota reporting
 
-[Prisma schema](backend/prisma/schema.prisma) defines four current models:
+[Prisma schema](backend/prisma/schema.prisma) defines five current models:
 
 | Model | Main information |
 | --- | --- |
@@ -309,10 +318,11 @@ This browser export is a user file copy only. It contains no PostgreSQL dump, se
 | `Session` | User relation, hashed token, expiry and timestamps |
 | `Folder` | Owner, parent, name and root flag |
 | `File` | Owner, folder, original name, UUID storage key, MIME type, size and timestamps |
+| `FileShare` | Owner, file, unique SHA-256 token hash, optional expiry and download limit, download count and revocation time |
 
 PostgreSQL contains no file-byte/blob column. Routes generate UUID file IDs/keys; user and folder IDs use CUIDs. Size and quota values are BigInts. `jsonSafe()` serializes them as strings for API responses; the browser converts them to numbers for presentation.
 
-The migration sequence is initial schema → foreign-key adjustments → local-storage migration. Historical migrations retain the old column names for upgrade compatibility. The local migration renames the file storage column, removes `UploadIntent` and its enum, sets existing users to 5 GiB and clears old reservations. It does not download or transfer legacy file bytes.
+The migration sequence is initial schema → foreign-key adjustments → local-storage migration → public file-share links. Historical migrations retain the old column names for upgrade compatibility. The local migration renames the file storage column, removes `UploadIntent` and its enum, sets existing users to 5 GiB and clears old reservations. It does not download or transfer legacy file bytes.
 
 `GET /api/storage` returns quota, used/available bytes and file/folder counts. Its displayed available space is `storageLimit - storageUsed`; it does not subtract in-flight reservations, although upload enforcement does.
 
@@ -423,11 +433,11 @@ The API also trusts the client-declared MIME classification for filtering; it va
 
 ## 13. Tests and verification scope
 
-There are **35 tests: 12 filesystem/config tests, four CORS tests, three observability tests and 16 database integration tests**. The CORS tests cover changing tunnel origins, credentialed preflights, explicit allowlists, invalid origins and continued authentication enforcement. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
+There are **37 tests: 12 filesystem/config tests, four CORS tests, three observability tests and 18 database integration tests**. The CORS tests cover changing tunnel origins, credentialed preflights, explicit allowlists, invalid origins and continued authentication enforcement. They cover path traversal, symlinks, exact-size writes, interruptions, empty files, permissions, authentication, ownership, quota concurrency, filtering/folders, hashed share tokens with expiry/download-limit/revocation enforcement, and delete accounting. Integration tests are skipped without `TEST_DATABASE_URL` and clear application tables in the explicitly supplied test database.
 
 The smoke script builds an isolated Docker network, starts disposable PostgreSQL/Redis plus the application and Nginx containers, mounts a temporary upload directory, applies migrations, exercises credentialed CORS preflights and HTTP registration/upload/list/download/quota/delete and page responses through Nginx, and checks graceful backend shutdown. Its cleanup removes the temporary containers/network/directory. It does not operate on the live uploaded-file directory.
 
-Earlier monitoring work recorded 35 passing tests, application builds and live application checks. Those are historical results, not a fresh health report. This update reviewed repository sources only; it did not run tests, deploy containers, open a tunnel or send WhatsApp messages. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
+Earlier monitoring work recorded passing tests, application builds and live application checks; those are historical results, not a fresh health report. For this review the 19 database-free tests were re-run (`npx vitest run test/storage.test.ts test/cors.test.ts test/observability.test.ts` → 19 passed). The 18 integration tests were not run because they require an explicit disposable `TEST_DATABASE_URL`. No containers, migrations, tunnels or WhatsApp messages were started. The frontend workspace still defines `lint` as `next lint`; the configured CI explicitly runs backend ESLint plus Next's production build checks rather than claiming a standalone frontend ESLint pass.
 
 For operating commands, use [README.md](README.md) and [deploy/README.md](deploy/README.md). Section 2 describes configured infrastructure; neither present container health nor remote Actions execution was verified in this update.
 
@@ -618,6 +628,7 @@ window requirements and commands: [WhatsApp operations](deploy/WHATSAPP.md).
 | `ENV_FILE`, `RUNTIME_DIR` | Native tunnel/WhatsApp configuration file and state directory |
 | `CLOUDFLARED_RUNTIME_DIR` | Alloy bind source; must match custom native `RUNTIME_DIR` |
 | `BACKEND_IMAGE`, `FRONTEND_IMAGE` | Local image tags or deployment GHCR digests |
+| `SECURE_CLOUD_REPO`, `SECURE_CLOUD_REF`, `SECURE_CLOUD_DIR` | `install.sh` bootstrap clone URL (credentials are rejected), revision/tag and install directory |
 
 [Monitoring preparation](monitoring/scripts/prepare.mjs) generates missing Grafana
 and monitoring-role secrets, prepares env files/native logrotate configuration,
@@ -628,14 +639,42 @@ one-time bridge from older project containers: it preserves volumes, retains old
 containers stopped, and includes rollback if recreation fails. Never run old and
 new PostgreSQL/Redis containers against the same volumes simultaneously.
 
-There is currently **no `install.sh`** in the repository. The requested one-command
-installer has not been implemented; prerequisites, storage ownership, initial
-configuration and existing-database preparation remain operator setup steps.
-Use [deployment setup](deploy/README.md) and [monitoring operations](monitoring/README.md).
-
-After prerequisites and preparation, from the repository root:
+[install.sh](install.sh) is the supported single-host Ubuntu installer. Run it from a
+checkout, or bootstrap a fresh server with curl:
 
 ```bash
+bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Aneeb-Kashif2/private-cloud/main/install.sh | bash
+```
+
+The bootstrap installs Git when needed, clones `SECURE_CLOUD_REF` (default `main`)
+into `SECURE_CLOUD_DIR` (default `/opt/secure-cloud`) and re-runs itself from there.
+It rejects `SECURE_CLOUD_REPO` URLs that embed a username, password or token, and
+requires a URL without credentials for private mirrors. The installer installs
+missing curl/Git/Python 3 and, when absent, Docker plus the Compose plugin from
+Docker's official Ubuntu repository; it validates Compose ≥ 2.24.0. It creates only
+missing configuration through [install-config.py](scripts/install-config.py),
+generates random `AUTH_SECRET` and database credentials for a fresh installation,
+refuses to replace credentials when an existing database volume or stored bytes are
+detected, prepares `/srv/secure-cloud-storage` with the application UID/GID, builds
+both images, runs the existing migration command against the database, starts the
+stack and waits for `http://localhost:8080/health`. `--status`, `--update` and
+`--uninstall` operate on the existing deployment; uninstall removes application
+containers only and never runs `down -v` or deletes user data.
+
+The installer intentionally does not prepare monitoring credentials, does not start
+Prometheus/Grafana/Loki/exporters, and does not adopt legacy database containers:
+those remain the [monitoring setup](monitoring/README.md) steps. Use
+[deployment setup](deploy/README.md) for the split EC2/Ubuntu or other custom
+topologies.
+
+On a supported Ubuntu single host, `bash install.sh` performs the build → migrate →
+start sequence and the health check. The equivalent explicit commands, and the
+native tunnel controls, are:
+
+```bash
+bash install.sh --status          # container status, including the one-shot migration job
+bash install.sh --update          # rebuild the checked-out source, migrate and restart
 docker compose build
 docker compose up -d --wait --wait-timeout 180
 docker compose ps --all

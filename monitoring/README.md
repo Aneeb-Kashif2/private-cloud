@@ -215,9 +215,10 @@ access. cAdvisor's export of arbitrary container labels is disabled.
   is time-based, not a hard disk quota; monitor host free space.
 - Docker logs: 5 MB × two files per managed container.
 - Grafana, Prometheus, Loki and Alloy positions use named persistent volumes.
-- Monitoring containers have CPU limits and memory caps totaling about 1.3 GiB
-  (plus optional 128 MiB for cloudflared). Actual usage varies; watch the container
-  dashboard. PostgreSQL/application resource behavior is unchanged.
+- Monitoring containers have CPU limits and memory caps totaling 1,248 MiB across
+  the nine monitoring services (plus optional 128 MiB for cloudflared). Actual usage
+  varies; watch the container dashboard. PostgreSQL/application resource behavior is
+  unchanged.
 - Loki caches are limited to 48 MB combined; query concurrency and ingestion are
   constrained. No Kubernetes, external object storage, S3 or new disk partitions.
 

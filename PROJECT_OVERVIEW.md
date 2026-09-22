@@ -1,6 +1,6 @@
 # Secure Cloud: project and infrastructure overview
 
-**Updated from repository sources on 19 September 2026 (PKT).** This describes
+**Updated from repository sources on 22 September 2026 (PKT).** This describes
 configured infrastructure; it is not a fresh report of running containers.
 
 Secure Cloud supports a single-host Ubuntu deployment and a split EC2/Ubuntu
@@ -45,6 +45,8 @@ with credentials. Uploads reserve quota atomically in PostgreSQL, stream into sa
 UUID paths, verify the exact size, then commit metadata and usage. Failures clean
 up partial content/reservations. Downloads enforce ownership; permanent deletion
 removes bytes and decrements metadata usage. Folders are logical database records.
+Public share links store only a SHA-256 token hash, support optional expiry and
+download limits, and can be revoked by their owner.
 
 ## Complete infrastructure
 
@@ -84,7 +86,7 @@ including the one-shot migration job, and an optional container tunnel.
 | Metrics | Prometheus, Node Exporter, cAdvisor, Nginx/PostgreSQL/Redis exporters, private Fastify metrics |
 | Logs | Alloy Docker discovery and native tunnel-file collection → Loki |
 | Dashboards | Grafana with provisioned Prometheus/Loki sources and seven dashboards |
-| Public access | Native cloudflared + WhatsApp scripts, or optional Compose `tunnel` profile |
+| Public access | Native cloudflared Quick Tunnel + WhatsApp scripts, optional Compose `tunnel` profile, or the named Tunnel on the EC2 edge |
 | CI/CD | GitHub Actions checks/builds, GHCR images, optional self-hosted production deployment |
 
 Application and monitoring containers use Linux host networking. PostgreSQL and
@@ -126,8 +128,13 @@ preparation remains separate so the lightweight application install does not sta
 Prometheus, Grafana, Loki or exporters unless requested.
 After setup, Compose orders database health → migrations → backend → frontend →
 Nginx. Updates can interrupt uploads; the backend has a five-minute shutdown grace
-period. There is no automatic backup, HA/failover, delivery webhook or configured
+period. There is no enabled automatic backup, HA/failover, delivery webhook or configured
 alert-notification destination. The laptop remains a single point of failure.
+
+Backup and restore scripts are supplied but are manual: an optional systemd timer
+runs the coordinated database/filesystem backup daily, and it is not installed or
+enabled by the installer. Public share links store only a token hash and remain
+valid after logout until they expire or an owner revokes them.
 
 Earlier work verified application operations and Grafana provisioning. Current
 container status, final monitoring ingestion, cAdvisor and WhatsApp delivery were

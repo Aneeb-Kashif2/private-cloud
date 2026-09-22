@@ -40,7 +40,7 @@ Next.js frontend, Fastify API, PostgreSQL/Prisma metadata and Redis sessions/cac
 
 For container deployment and the CI/CD pipeline, see [Docker and GitHub Actions setup](deploy/README.md). Docker runs the application on this same Ubuntu server and bind-mounts the existing storage directory.
 
-For the full configured infrastructure, ports, persistence and request flows (updated 12 September 2026), see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
+For the full configured infrastructure, ports, persistence and request flows (updated 22 September 2026), see [Current architecture and flow](CURRENT_ARCHITECTURE_AND_FLOW.md).
 
 For the production two-machine topology, see [split EC2/Ubuntu deployment](deploy/SPLIT_DEPLOYMENT.md). The browser uses same-origin `/api`; EC2 Nginx sends private API traffic over Tailscale to Ubuntu. The older [Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md) is for development/legacy operation only.
 
@@ -109,8 +109,25 @@ Docker startup uses a separate migration service before the API starts. Host-bas
 - `GET /api/files`: owner-scoped listing, search, MIME filter, sorting and pagination.
 - Folder routes and file moves use PostgreSQL metadata; folder names never become disk paths.
 - `DELETE /api/files/:id`: removes file content permanently, then transactionally deletes metadata and decrements usage once. Missing content allows deletion to be retried; other filesystem failures retain metadata and quota.
+- `POST /api/files/:id/shares`: creates a public link for an owned file with `expiration` (`1h`, `1d`, `7d` or `never`) and an optional `maxDownloads` (1–10000). Only a SHA-256 hash of the 43-character token is stored.
+- `GET /api/files/:id/shares` / `DELETE /api/shares/:shareId`: lists and revokes share links owned by the current user.
+- `GET /api/shares/:token` / `GET /api/shares/:token/download`: public, rate-limited metadata and attachment download. A revoked, expired or exhausted link returns the same 404 as an unknown token, and each download increments the counter with one atomic SQL condition so a download limit cannot be exceeded.
 
 New files have mode `0600`. The adapter requests `0700` when creating its root directory, but the current existing directory is `0755`; it does not automatically tighten existing permissions. Only generated UUID keys are accepted, file creation is exclusive, and symlinks are not followed. User filenames appear only in metadata and encoded download headers.
+
+### Share a file with a link
+
+Each file row and card in the file manager has a share button. The dialog lists the
+file's existing links and can create a new one with an expiry (`1h`, `1d`, `7d` or
+never) and an optional download limit. **Copy link** puts
+`<your hostname>/share/<token>` on the clipboard; the recipient opens it without an
+account. Share links can be revoked at any time, and the list marks revoked links.
+
+Public share responses never expose the file ID, the storage key, or the owner.
+Shares are separate from account access: logging out or changing a password does not
+invalidate an outstanding link, so revoke links you no longer want to be reachable.
+Share creation, listing and revocation require authentication; only token
+inspection and download are public.
 
 ## Existing installations and recovery
 
@@ -126,14 +143,14 @@ npm test
 npm run build
 ```
 
-The suite contains 35 tests, including filesystem/config, CORS, observability and database integration coverage. Filesystem and CORS tests run without a live database. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
+The suite contains 37 tests: 12 filesystem/config, four CORS, three observability and 18 database integration tests. Filesystem, config and CORS tests run without a live database. Integration tests require an explicit **disposable** `TEST_DATABASE_URL`; they clear that test database's application tables. They never fall back to your application database.
 
 ```bash
 DATABASE_URL="$TEST_DATABASE_URL" npm run prisma:deploy --workspace backend
 npm test
 ```
 
-Integration coverage includes authentication, ownership, upload/download bytes, quota concurrency, failed-upload cleanup and permanent-delete accounting.
+Integration coverage includes authentication, ownership, upload/download bytes, quota concurrency, failed-upload cleanup, hashed share tokens with expiry/download-limit/revocation enforcement, and permanent-delete accounting.
 
 Development uses `frontend/.next-dev`; production builds use `frontend/.next`. Keeping these separate prevents missing vendor chunks when building while the dev server runs.
 
