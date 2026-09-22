@@ -1,18 +1,19 @@
 # Secure Cloud: project and infrastructure overview
 
-**Updated from repository sources on 12 September 2026 (PKT).** This describes
+**Updated from repository sources on 19 September 2026 (PKT).** This describes
 configured infrastructure; it is not a fresh report of running containers.
 
-Secure Cloud runs on one Ubuntu laptop. Docker Compose manages the Next.js
-frontend, Fastify backend, Nginx, PostgreSQL, Redis and a local monitoring stack.
+Secure Cloud supports a single-host Ubuntu deployment and a split EC2/Ubuntu
+production deployment. Docker Compose manages the Next.js frontend, Fastify
+backend, Nginx, PostgreSQL, Redis and an optional local monitoring stack.
 User file bytes remain in `/srv/secure-cloud-storage`. PostgreSQL contains users,
 sessions, folders, file metadata and quota counters; Redis provides caching and
 rate-limit support. Every user has a 5 GiB (`5368709120` bytes) quota.
 
 ```mermaid
 flowchart LR
-    Phone[Browser or phone] -->|HTTPS| CF[Cloudflare Quick Tunnel]
-    CF --> T[cloudflared on Ubuntu]
+    Phone[Browser or phone] -->|HTTPS| CF[Cloudflare named Tunnel]
+    CF --> T[cloudflared on EC2 or Ubuntu]
     T --> N[Nginx :8080]
     LAN[Local or LAN browser] --> N
     N -->|pages| F[Next.js :3000]
@@ -46,6 +47,32 @@ up partial content/reservations. Downloads enforce ownership; permanent deletion
 removes bytes and decrements metadata usage. Folders are logical database records.
 
 ## Complete infrastructure
+
+### Installation and deployment flow
+
+For a checkout, run `bash install.sh`. On a fresh Ubuntu server, the same process
+can be bootstrapped with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aneeb-Kashif2/private-cloud/main/install.sh | bash
+```
+
+The bootstrap clones the repository into `/opt/secure-cloud`, installs missing
+prerequisites, creates only missing configuration, generates secrets locally,
+creates `/srv/secure-cloud-storage`, runs Prisma migrations and starts the stack.
+It preserves existing `.env` files, database/Redis volumes and user files.
+
+Production split deployment keeps Next.js, public Nginx, Cloudflare named Tunnel and
+Tailscale on EC2. Ubuntu keeps private Nginx, Fastify, PostgreSQL, Redis and local
+storage. The browser still uses relative `/api` URLs:
+
+```text
+Browser -> Cloudflare -> EC2 Nginx -> /api/* -> Tailscale -> Ubuntu Nginx -> Fastify
+                                               Fastify -> PostgreSQL / Redis / local files
+```
+
+See [split deployment](deploy/SPLIT_DEPLOYMENT.md) for the machine-specific
+environment files and commands.
 
 Root `compose.yaml` includes `monitoring/compose.yaml`: 15 default services,
 including the one-shot migration job, and an optional container tunnel.
@@ -94,8 +121,9 @@ Root `.env` supplies Compose interpolation/native WhatsApp configuration;
 locally generated under `monitoring/runtime`. Production Actions expects
 `/etc/secure-cloud/backend.env` and `/etc/secure-cloud/monitoring`.
 
-There is **no `install.sh` yet**. Existing monitoring preparation requires a
-reachable database and the original volumes; it is not a fresh-machine bootstrap.
+The repository includes an idempotent `install.sh` and curl bootstrap. Monitoring
+preparation remains separate so the lightweight application install does not start
+Prometheus, Grafana, Loki or exporters unless requested.
 After setup, Compose orders database health → migrations → backend → frontend →
 Nginx. Updates can interrupt uploads; the backend has a five-minute shutdown grace
 period. There is no automatic backup, HA/failover, delivery webhook or configured
