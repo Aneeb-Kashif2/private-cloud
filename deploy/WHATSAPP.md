@@ -4,8 +4,10 @@ The native scripts start a Quick Tunnel to Nginx on port 8080, wait for its publ
 `/health` endpoint, then submit the URL and health status to Meta's WhatsApp Cloud
 API. They do not modify application authentication or local file storage.
 
-Requirements: Ubuntu, Node 22+, project dependencies (`npm ci`), cloudflared,
-curl, and `flock` (util-linux). Configure these values in the root `.env`:
+Requirements for notifications: Ubuntu, Node 22+, project dependencies (`npm ci`),
+cloudflared, curl, and `flock` (util-linux). The tunnel itself does not require
+WhatsApp configuration; omit the three required `WHATSAPP_*` values to run without
+notifications. Configure these values in the root `.env` when notifications are wanted:
 
 ```dotenv
 WHATSAPP_ACCESS_TOKEN=your-meta-access-token

@@ -20,8 +20,25 @@ trap 'exit 143' TERM
 for dependency in cloudflared curl node nohup; do
   command -v "$dependency" >/dev/null || die "$dependency is not installed"
 done
-# Parse dotenv without executing shell content; validate before creating a tunnel.
-node "$root_dir/scripts/notify-whatsapp.mjs" check "$env_file"
+# WhatsApp notification is optional. If any notification setting is present,
+# validate the complete configuration before creating a tunnel.
+whatsapp_config=$(node --input-type=module - "$env_file" <<'NODE'
+import { readFile } from 'node:fs/promises';
+import { parse } from 'dotenv';
+
+const file = process.argv[2];
+const values = { ...parse(await readFile(file)), ...process.env };
+const names = ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_RECIPIENT'];
+const present = names.filter((name) => values[name]?.trim() && !values[name].trim().startsWith('replace-'));
+console.log(present.length === 0 ? 'disabled' : present.length === names.length ? 'enabled' : 'incomplete');
+NODE
+)
+case "$whatsapp_config" in
+  enabled) node "$root_dir/scripts/notify-whatsapp.mjs" check "$env_file" ;;
+  incomplete) die 'WhatsApp notification settings are incomplete; set all required values or remove them to run without notifications' ;;
+  disabled) : ;;
+  *) die 'could not determine WhatsApp notification configuration' ;;
+esac
 if managed_process; then
   die 'the managed tunnel is already running; use notify-whatsapp.mjs to retry its notification'
 fi
@@ -60,10 +77,12 @@ for _ in {1..60}; do
 done
 [[ "$health_code" == 200 ]] && managed_process || die 'public tunnel health check failed'
 printf '%s\n' "$tunnel_url" > "$url_file"
-# Notification failure must not destroy a healthy tunnel.
 keep_tunnel=true
-if ! node "$root_dir/scripts/notify-whatsapp.mjs" send "$env_file" "$url_file"; then
-  printf 'Tunnel remains running. URL: %s\n' "$tunnel_url" >&2
-  exit 1
+if [[ "$whatsapp_config" == enabled ]]; then
+  # Notification failure must not destroy a healthy tunnel.
+  if ! node "$root_dir/scripts/notify-whatsapp.mjs" send "$env_file" "$url_file"; then
+    printf 'Tunnel remains running. URL: %s\n' "$tunnel_url" >&2
+    exit 1
+  fi
 fi
 printf 'Quick Tunnel is running. URL: %s (health: HTTP 200)\n' "$tunnel_url"
