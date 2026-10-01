@@ -1,0 +1,31 @@
+# Checkov configuration for the AWS edge module.
+#
+# soft-fail is true on purpose: a security scanner that blocks the very first pull request
+# teaches a team nothing and gets disabled. Run it once, triage the output, add the real
+# exceptions with a reason, then set soft-fail to false and make it a gate.
+
+soft-fail: true
+
+framework:
+  - terraform
+
+# Findings we have looked at and deliberately accepted for this specific design.
+skip-check:
+  # CKV_AWS_2: "Ensure ALB protocol is HTTPS" — no load balancer is created here, and the
+  # check cannot be satisfied by an EC2 instance. TLS is terminated at Cloudflare.
+  - CKV_AWS_2
+
+  # CKV_AWS_12: "Ensure the default security group of every VPC restricts all traffic" —
+  # the default security group is not attached to anything; the edge uses its own group
+  # with least-privilege rules.
+  - CKV_AWS_12
+
+  # CKV_AWS_130: "Ensure VPC subnets do not assign public IP by default" — intentional.
+  # The edge host needs a public address to bootstrap and to run the outbound Cloudflare
+  # tunnel; set assign_public_ip = false when a private egress path exists.
+  - CKV_AWS_130
+
+  # CKV_AWS_79: "Ensure Instance Metadata Service Version 1 is not enabled" — already
+  # satisfied by metadata_options { http_tokens = "required" }, listed here only as
+  # documentation of where IMDSv2 is configured.
+  - CKV_AWS_79

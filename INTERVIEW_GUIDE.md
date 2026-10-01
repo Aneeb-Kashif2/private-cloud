@@ -4,6 +4,15 @@
 > not from memory. Line references are given so you can jump to the source live during
 > an interview.
 
+**Companion documents**
+
+| Document | Use it for |
+|---|---|
+| `DEVOPS_UPGRADE_PLAN.md` | A DevOps maturity audit with scores, plus a prioritised roadmap of what to add next and the interview question each addition unlocks |
+| `deploy/RUNBOOKS.md` | One runbook per alert — meaning, impact, first commands, diagnosis, remediation, and the signal that clears it |
+| `CURRENT_ARCHITECTURE_AND_FLOW.md` | The exhaustive technical reference: ports, volumes, environment map, monitoring data flow |
+| `SECURITY.md` | Vulnerability disclosure policy and a single-table inventory of every security control |
+
 ---
 
 ## Table of contents
@@ -87,6 +96,31 @@ concurrent uploads can't overspend storage."
   and **Terraform** for an AWS EC2 edge in a split EC2 + Ubuntu topology.
 - Wrote a one-command, idempotent **Ubuntu installer** with `--status/--update/--uninstall`
   that generates secrets locally, preserves existing data and health-checks startup.
+
+### 2.1 DevOps standards this project actually implements
+
+Paste this table into a CV or a portfolio README. Every row is verifiable in the repository —
+none of it is aspirational.
+
+| Capability | Implementation |
+|---|---|
+| CI | GitHub Actions: typecheck, lint, 37 tests, production build, monitoring-config validation |
+| Security scanning | Gitleaks over full git history, Trivy filesystem scan, `npm audit`, and a **gating** Trivy image scan on CRITICAL CVEs |
+| Supply chain | Images built once, smoke-tested in real containers, published and deployed by **immutable digest**, plus a CycloneDX SBOM per image |
+| Infrastructure as code | Terraform (VPC, EC2 edge, IAM/SSM, security group) with `fmt`, `validate`, `tflint`, `checkov`, an OIDC plan and weekly **drift detection** |
+| Containers | Multi-stage builds, non-root user, `cap_drop: [ALL]`, `no-new-privileges`, healthchecks, 5 MB × 2 log rotation |
+| CD | Build → container smoke test → environment-gated deploy of the tested digest; writers stopped and migrations run before the API restarts |
+| Observability | Prometheus, Grafana, Loki, Alloy, cAdvisor, four exporters — privacy-filtered, retention-bounded, loopback-only |
+| Alerting | Alertmanager with routing, grouping and inhibition; rule files **unit tested with promtool** |
+| Reliability | SLOs (99.5% availability, 99% upload success) with error budgets and multi-window burn-rate alerts |
+| Incident response | A 7-part runbook per alert in `deploy/RUNBOOKS.md`, with an escalation policy |
+| Data protection | Coordinated PostgreSQL + filesystem backup, root-owned `0700` directories, manifest and checksum verification, traversal-rejecting archive validation |
+| DevEx | One-command idempotent installer, a `make` interface with 32 targets, `.nvmrc`, `.editorconfig` |
+| Governance | `CODEOWNERS` area ownership, a PR template that encodes the project's invariants, issue templates, and a vulnerability disclosure policy |
+
+**One line to say about it:** *"The pipeline is the part I care about most: I deploy the exact
+image digest that passed a container smoke test, the schema migration runs before the API comes
+back up, and every alert has a runbook — so the delivery path is as tested as the code."*
 
 ---
 
@@ -832,14 +866,15 @@ Two subtleties worth mentioning:
 
 ### 12.2 The monitoring stack (`monitoring/compose.yaml`)
 
-15 default services come up in single-host mode: `migrate`, `backend`, `frontend`,
-`nginx`, `postgres`, `redis`, plus `prometheus`, `loki`, `grafana`, `alloy`,
-`node-exporter`, `cadvisor`, `nginx-exporter`, `postgres-exporter`, `redis-exporter`.
-(`cloudflared` sits behind the `tunnel` profile.)
+16 default services come up in single-host mode: `migrate`, `backend`, `frontend`,
+`nginx`, `postgres`, `redis`, plus `prometheus`, `loki`, `alertmanager`, `grafana`,
+`alloy`, `node-exporter`, `cadvisor`, `nginx-exporter`, `postgres-exporter`,
+`redis-exporter`. (`cloudflared` sits behind the `tunnel` profile.)
 
 | Component | Port (all loopback) | Role |
 |---|---|---|
-| Prometheus | `127.0.0.1:9090` | scrape + store metrics, evaluate alert rules |
+| Prometheus | `127.0.0.1:9090` | scrape + store metrics, evaluate alert and SLO rules |
+| Alertmanager | `127.0.0.1:9093` | route, group and inhibit firing alerts |
 | Loki | `127.0.0.1:3100` | store privacy-filtered logs |
 | Grafana | `127.0.0.1:3002` | dashboards, reached via Nginx `/grafana/` |
 | Alloy | `127.0.0.1:12345` | discover containers, tail logs, filter, ship to Loki |
@@ -882,10 +917,13 @@ prevented twice over. The native `cloudflared` log (not a container) needs host
 
 ### 12.4 What is *not* automatic (say this honestly)
 
-Alert **rules** exist, but there is no configured alert **notifier** (no email, Slack or
-WhatsApp alerting), and cAdvisor ingestion has not been re-verified in the latest session.
-`monitoring/IMPLEMENTATION_STATUS.md` deliberately separates "implemented" from "observed
-running".
+Alert rules and SLO burn-rate rules both exist, and both are routed to **Alertmanager**, which
+groups and inhibits them; every alert links to a runbook in `deploy/RUNBOOKS.md`. The one
+remaining piece is a real notification **destination**: the shipped receiver points at a
+loopback webhook placeholder, so plugging in Slack, email or the existing WhatsApp notifier is
+a configuration change rather than new code. cAdvisor ingestion has not been re-verified in the
+latest session, and `monitoring/IMPLEMENTATION_STATUS.md` deliberately separates "implemented"
+from "observed running".
 
 ---
 
@@ -1040,6 +1078,16 @@ Manual dispatch with two independent booleans and two self-hosted runners:
 `secure-cloud-ubuntu` (data plane: pull backend image, run migrate, up backend+nginx) and
 `secure-cloud-ec2` (edge: pull frontend image, up frontend+nginx). Neither job copies
 secrets to the other machine — each host already holds exactly what it needs.
+
+### 14.3 Two more workflows guard the pipeline itself
+
+| Workflow | What it does |
+|---|---|
+| `.github/workflows/security.yml` | Four scanners: Gitleaks over full git history, `npm audit`, Trivy filesystem scan, and a **gating** Trivy image scan on CRITICAL CVEs. Also publishes a CycloneDX SBOM and runs weekly so a newly published CVE is caught without a code change |
+| `.github/workflows/terraform.yml` | `terraform fmt -check`, `init -backend=false`, `validate`, `tflint`, `checkov`, an **opt-in** OIDC plan that publishes the diff into the job summary, and a weekly scheduled drift check that fails loudly when the live infrastructure no longer matches the repository |
+
+Both are additive: they wrap the existing pipeline rather than changing it, so a red security scan
+never blocks the application build from producing a diagnosable artefact.
 
 ---
 
@@ -1248,7 +1296,7 @@ and visible in the repo.
 |---|---|---|---|
 | 1 | **Single point of failure** | Everything runs on one machine; there is no HA or failover. | Replicate PostgreSQL, move bytes to S3-compatible storage, run two app nodes |
 | 2 | **Backup timer not enabled** | The scripts and systemd timer exist and work, but the installer deliberately does not enable the schedule. | Enable it behind an explicit installer flag |
-| 3 | **No alert notifier** | Prometheus alert *rules* exist but no destination is configured. | Add Alertmanager (or reuse the existing WhatsApp path) |
+| 3 | **No alert *destination*** | Alert rules exist and now route through Alertmanager, but the receiver is a loopback placeholder: no Slack, email or WhatsApp destination is configured. | Point the receiver at a real channel (or wrap the existing WhatsApp notifier as a webhook target) |
 | 4 | **No recoverable trash** | Delete is permanent by design; the Trash page is a placeholder. | Soft delete with `deletedAt` plus a purge job |
 | 5 | **No resumable uploads** | A dropped 5 GiB upload restarts from zero. | Multipart / tus-style resumable uploads |
 | 6 | **Cache invalidation is targeted** | After moving a file, the old folder's cached list can be stale for up to 60 s. | Tag-based invalidation or event-driven keys |
@@ -1420,7 +1468,7 @@ those three first — and I would rather say that than pretend it is finished."
 | Tests | **37** (12 storage + 4 CORS + 3 observability + 18 integration) |
 | Database models | 5 |
 | Migrations | 4 |
-| Compose services (single host) | 15 default + 1 optional (`cloudflared` profile) |
+| Compose services (single host) | 16 default + 1 optional (`cloudflared` profile) |
 | Monitoring memory budget | ≈ 1,248 MiB |
 | Prometheus retention | 7 days / 1 GB |
 | Loki retention | 72 hours (ingest 1 MB/s) |

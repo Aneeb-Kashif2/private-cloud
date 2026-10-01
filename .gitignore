@@ -64,4 +64,7 @@ infra/*.tfstate.*
 infra/*.tfplan
 infra/terraform.tfvars
 
+# Generated software bill of materials (make sbom).
+/sbom/
+
 !deploy/backup.env.example

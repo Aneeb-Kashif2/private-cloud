@@ -1,0 +1,175 @@
+# Service level objectives, expressed as recording rules plus multi-window burn-rate
+# alerts.
+#
+# Why this file exists: alerts.yml answers "is something broken right now?". This file
+# answers the harder question an operator actually gets asked - "are we still meeting what
+# we promised, and how fast are we spending the error budget?" A 5xx here and there is
+# noise; burning 2% of a monthly budget in an hour is a decision.
+#
+# The pattern is multi-window, multi-burn-rate: a short window detects quickly, a longer
+# window confirms it is real, and both must agree before anyone is woken up. That buys fast
+# detection without trading away sleep.
+
+groups:
+  - name: secure-cloud-slo-recording
+    interval: 30s
+    rules:
+      # --------------------------------------------------------------------------
+      # SLO 1: 99.5% of HTTP requests are not server errors, over a 30-day window.
+      # Budget: 0.5% of requests, i.e. 0.005.
+      # `or vector(1)` keeps a completely idle system at a healthy ratio: an empty series
+      # would otherwise read as "no data" and could hide a real outage.
+      # --------------------------------------------------------------------------
+      - record: secure_cloud:sli_availability:ratio_rate5m
+        expr: |
+          (
+            sum(rate(secure_cloud_http_requests_total{status_code!~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(secure_cloud_http_requests_total[5m])), 0.001)
+          )
+          or vector(1)
+
+      - record: secure_cloud:sli_availability:ratio_rate30m
+        expr: |
+          (
+            sum(rate(secure_cloud_http_requests_total{status_code!~"5.."}[30m]))
+              /
+            clamp_min(sum(rate(secure_cloud_http_requests_total[30m])), 0.001)
+          )
+          or vector(1)
+
+      - record: secure_cloud:sli_availability:ratio_rate1h
+        expr: |
+          (
+            sum(rate(secure_cloud_http_requests_total{status_code!~"5.."}[1h]))
+              /
+            clamp_min(sum(rate(secure_cloud_http_requests_total[1h])), 0.001)
+          )
+          or vector(1)
+
+      - record: secure_cloud:sli_availability:ratio_rate6h
+        expr: |
+          (
+            sum(rate(secure_cloud_http_requests_total{status_code!~"5.."}[6h]))
+              /
+            clamp_min(sum(rate(secure_cloud_http_requests_total[6h])), 0.001)
+          )
+          or vector(1)
+
+      - record: secure_cloud:sli_availability:ratio_rate3d
+        expr: |
+          (
+            sum(rate(secure_cloud_http_requests_total{status_code!~"5.."}[3d]))
+              /
+            clamp_min(sum(rate(secure_cloud_http_requests_total[3d])), 0.001)
+          )
+          or vector(1)
+
+      # --------------------------------------------------------------------------
+      # SLO 2: 99% of upload attempts succeed. Budget: 0.01.
+      # Uploads are weighted separately because a failed 4 GiB transfer costs the user far
+      # more than a failed metadata read.
+      # --------------------------------------------------------------------------
+      - record: secure_cloud:sli_upload_success:ratio_rate5m
+        expr: |
+          (
+            sum(rate(secure_cloud_uploads_total{outcome="success"}[5m]))
+              /
+            clamp_min(sum(rate(secure_cloud_uploads_total[5m])), 0.001)
+          )
+          or vector(1)
+
+      - record: secure_cloud:sli_upload_success:ratio_rate1h
+        expr: |
+          (
+            sum(rate(secure_cloud_uploads_total{outcome="success"}[1h]))
+              /
+            clamp_min(sum(rate(secure_cloud_uploads_total[1h])), 0.001)
+          )
+          or vector(1)
+
+      # --------------------------------------------------------------------------
+      # SLO 3: 95% of metadata requests finish within one second.
+      # Streaming routes are excluded on purpose: their duration is a function of file
+      # size and the client's connection, not of API performance. Including them would
+      # make the objective meaningless.
+      # --------------------------------------------------------------------------
+      - record: secure_cloud:sli_latency_seconds:p95_rate5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(secure_cloud_http_request_duration_seconds_bucket{
+                route!~"/api/files/upload|/api/files/:id/download|/api/files/backup"
+              }[5m])
+            )
+          )
+
+      - record: secure_cloud:sli_latency_seconds:p99_rate5m
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (
+              rate(secure_cloud_http_request_duration_seconds_bucket{
+                route!~"/api/files/upload|/api/files/:id/download|/api/files/backup"
+              }[5m])
+            )
+          )
+
+  - name: secure-cloud-slo-alerts
+    interval: 30s
+    rules:
+      # 14.4x burn over one hour exhausts a 30-day budget in about two days. The 5-minute
+      # window confirms it is current, so one bad scrape cannot wake anyone up.
+      - alert: SecureCloudAvailabilityFastBurn
+        expr: |
+          (1 - secure_cloud:sli_availability:ratio_rate5m) > (14.4 * 0.005)
+            and
+          (1 - secure_cloud:sli_availability:ratio_rate1h) > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: critical
+          slo: availability-99.5-30d
+        annotations:
+          summary: 'Availability is burning budget 14.4x too fast'
+          runbook: 'deploy/RUNBOOKS.md#availability-fast-burn'
+
+      # 6x burn over six hours exhausts the budget in about five days: slower, but still a
+      # real trend rather than a blip.
+      - alert: SecureCloudAvailabilitySlowBurn
+        expr: |
+          (1 - secure_cloud:sli_availability:ratio_rate30m) > (6 * 0.005)
+            and
+          (1 - secure_cloud:sli_availability:ratio_rate6h) > (6 * 0.005)
+        for: 15m
+        labels:
+          severity: warning
+          slo: availability-99.5-30d
+        annotations:
+          summary: 'Availability is burning budget 6x too fast'
+          runbook: 'deploy/RUNBOOKS.md#availability-slow-burn'
+
+      - alert: SecureCloudUploadReliabilityFastBurn
+        expr: |
+          (1 - secure_cloud:sli_upload_success:ratio_rate5m) > (14.4 * 0.01)
+            and
+          (1 - secure_cloud:sli_upload_success:ratio_rate1h) > (14.4 * 0.01)
+        for: 5m
+        labels:
+          severity: warning
+          slo: upload-success-99-30d
+        annotations:
+          summary: 'Upload failures are burning the upload budget 14.4x too fast'
+          runbook: 'deploy/RUNBOOKS.md#upload-failures'
+
+      # Not a burn rate: this is the "up but unusable" case. A p95 above one second on
+      # metadata routes means the database or the disk is struggling.
+      - alert: SecureCloudMetadataLatencyHigh
+        expr: secure_cloud:sli_latency_seconds:p95_rate5m > 1
+        for: 10m
+        labels:
+          severity: warning
+          slo: latency-1s-p95
+        annotations:
+          summary: 'p95 metadata latency has exceeded 1s for 10 minutes'
+          runbook: 'deploy/RUNBOOKS.md#latency'

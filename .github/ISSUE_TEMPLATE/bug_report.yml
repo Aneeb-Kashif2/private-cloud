@@ -1,0 +1,88 @@
+name: Bug report
+description: Report reproducible incorrect behaviour in Secure Cloud.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Do **not** include secrets, `.env` contents, session
+        cookies, database dumps or personal file names. For a security vulnerability,
+        use *Security → Report a vulnerability* instead of this template.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening
+      options:
+        - label: I searched the existing issues and this is not a duplicate
+          required: true
+        - label: I checked `bash install.sh --status` and the containers are healthy
+          required: true
+        - label: This is not a security vulnerability
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+      placeholder: I expected the upload to finish, but the request returned 413 QUOTA_EXCEEDED even though the storage bar showed 4 GB free.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as a normal account
+        2. Open Files and select a 500 MB file
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Authentication or sessions
+        - File upload
+        - File download
+        - Search, folders or moves
+        - Delete or quota accounting
+        - Public share links
+        - Backup export (ZIP)
+        - Frontend or layout
+        - Docker, Compose or Nginx
+        - Installer
+        - Monitoring, metrics or logs
+        - Terraform or AWS edge
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`
+      placeholder: c3b8f3b
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment mode, OS and browser. Never paste secret values.
+      placeholder: |
+        Mode: single host Docker Compose
+        OS: Ubuntu 24.04, Docker 27, Compose 2.29
+        Browser: Firefox 133
+        Reverse proxy: Nginx on 8080 behind a Cloudflare tunnel
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Redacted API response, relevant logs, or a screenshot. Remove cookies, tokens and file names.
+      render: shell
+    validations:
+      required: false

@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a change in behaviour or a new capability.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Describe the user-visible gap, not the implementation.
+      placeholder: When a large upload is interrupted I have to start again from 0%.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should happen instead? Include the API shape if it changes.
+      placeholder: |
+        Resumable uploads so the browser can continue after a dropped connection.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include "do nothing" and any simpler option.
+    validations:
+      required: false
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Which invariant could this affect?
+      description: These invariants are load-bearing. Flag them so the change gets the review it needs.
+      options:
+        - None, it is additive
+        - Quota accounting (storageUsed / storageReserved)
+        - Authentication or session lifetime
+        - Access control or ownership scoping
+        - Storage path or file layout on disk
+        - Database schema or a migration
+        - Backup, restore or recovery
+        - Deployment, CI/CD or infrastructure
+    validations:
+      required: true
+  - type: checkboxes
+    id: requirements
+    attributes:
+      label: Expected of the implementation
+      options:
+        - label: It must not weaken per-user ownership scoping
+          required: true
+        - label: It must not let a user exceed the 5 GiB quota
+          required: true
+        - label: It must keep secrets out of `NEXT_PUBLIC_*` variables
+          required: true
+        - label: It must not add user IDs, file names, URLs or tokens to metrics or logs
+          required: true
+        - label: I am willing to help test it
+          required: false

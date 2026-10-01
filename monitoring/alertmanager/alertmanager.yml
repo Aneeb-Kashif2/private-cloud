@@ -1,0 +1,72 @@
+# Alertmanager routing for Secure Cloud.
+#
+# Prometheus decides when an alert fires; Alertmanager decides who hears about it, how
+# often, and when to stay quiet. Until this file existed, every rule in alerts.yml fired
+# into nothing.
+#
+# Reachability: Alertmanager listens on 127.0.0.1:9093 only. Nginx does not proxy it, so
+# it is not reachable from the network or through the Cloudflare tunnel.
+
+global:
+  resolve_timeout: 5m
+  # Prometheus sends its own external labels; keep the notification payload small.
+  smtp_require_tls: true
+
+# Grouping: one notification per alertname/job pair rather than one per series, so a
+# restart that breaks six targets produces one message, not six.
+route:
+  receiver: default
+  group_by: ['alertname', 'job', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Data-safety alerts never wait for the next group interval: they are the ones that
+    # can end with lost bytes.
+    - matchers:
+        - alertname =~ "SecureCloudBackupUnhealthy|HostFilesystemLow|StorageMetricsStale"
+      receiver: data-safety
+      group_wait: 10s
+      repeat_interval: 1h
+    # SLO burn alerts are reported separately so they can be tuned independently.
+    - matchers:
+        - alertname =~ "SecureCloud.*(FastBurn|SlowBurn|P95High)"
+      receiver: slo
+      repeat_interval: 2h
+
+receivers:
+  # Placeholder sink. Alertmanager has no "do nothing" receiver, so this points at a
+  # loopback gateway you own. Replace the URL with whichever real destination you use:
+  #
+  #   webhook_configs: [{url: 'http://127.0.0.1:9099/alerts'}]        # a small relay
+  #   slack_configs:   [{api_url: '<secret>', channel: '#alerts'}]    # Slack / Teams
+  #   email_configs:   [{to: 'you@example.com'}]                      # SMTP relay
+  #
+  # The scripts/notify-whatsapp.mjs notifier from the tunnel tooling can also be wrapped
+  # by a tiny HTTP endpoint and used as the webhook target, which keeps every alert on the
+  # same channel you already read.
+  - name: default
+    webhook_configs:
+      - url: http://127.0.0.1:9099/alerts
+        send_resolved: true
+
+  - name: data-safety
+    webhook_configs:
+      - url: http://127.0.0.1:9099/alerts
+        send_resolved: true
+
+  - name: slo
+    webhook_configs:
+      - url: http://127.0.0.1:9099/alerts
+        send_resolved: true
+
+inhibit_rules:
+  # If a target is simply unreachable, do not also page for everything derived from it.
+  - source_matchers: [alertname = "ScrapeTargetDown"]
+    target_matchers: [severity = "warning"]
+    equal: ['job']
+
+  # A host-level problem explains its own downstream symptoms; keep the root cause.
+  - source_matchers: [alertname = "HostFilesystemLow"]
+    target_matchers: [alertname = "StorageMetricsStale"]
+    equal: []

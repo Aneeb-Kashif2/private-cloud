@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Aneeb-Kashif2/private-cloud/security/advisories/new
+    about: Report a vulnerability privately. Never open a public issue for a security problem.
+  - name: Setup, deployment and operations
+    url: https://github.com/Aneeb-Kashif2/private-cloud/blob/main/README.md
+    about: Installer, Compose, Nginx, Cloudflare, backup and restore guidance.
+  - name: Architecture and code flow
+    url: https://github.com/Aneeb-Kashif2/private-cloud/blob/main/CURRENT_ARCHITECTURE_AND_FLOW.md
+    about: How requests, quota accounting, storage and monitoring actually work.

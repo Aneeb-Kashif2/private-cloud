@@ -1,0 +1,22 @@
+# Default owner for everything in this repository.
+*                                   @Aneeb-Kashif2
+
+# Backend API: authentication, quota accounting, storage I/O, share tokens.
+/backend/src/plugins/               @Aneeb-Kashif2
+/backend/src/modules/               @Aneeb-Kashif2
+/backend/src/lib/storage.ts         @Aneeb-Kashif2
+/backend/prisma/                    @Aneeb-Kashif2
+
+# Delivery and infrastructure: changes here can take the site down.
+/.github/workflows/                 @Aneeb-Kashif2
+/.github/dependabot.yml             @Aneeb-Kashif2
+/infra/                             @Aneeb-Kashif2
+/deploy/                            @Aneeb-Kashif2
+/compose.yaml                       @Aneeb-Kashif2
+/install.sh                         @Aneeb-Kashif2
+/Makefile                           @Aneeb-Kashif2
+
+# Data safety: backup, restore and monitoring configuration.
+/monitoring/                        @Aneeb-Kashif2
+/scripts/                           @Aneeb-Kashif2
+/SECURITY.md                        @Aneeb-Kashif2
