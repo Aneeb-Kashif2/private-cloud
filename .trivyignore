@@ -1,0 +1,16 @@
+# Findings we have reviewed and accepted, which Trivy should therefore not report again.
+#
+# Rules for this file:
+#   - Format is one CVE / check ID per line. A trailing comment is allowed after the ID.
+#   - Every entry needs a reason and, where possible, a link or an expiry date.
+#   - An entry without a reason is a bug, not a decision.
+#
+# Currently empty: no finding has been accepted yet. The first accepted entry is
+# documented below as the template to copy.
+#
+# ---------------------------------------------------------------------------------
+# Example entry (kept commented out so the file stays honest):
+#
+# CVE-2024-00000  unreachable code path; upstream fix expected in openssl 3.5.2
+#                 reviewed 2026-09-01, re-check 2026-12-01
+# ---------------------------------------------------------------------------------

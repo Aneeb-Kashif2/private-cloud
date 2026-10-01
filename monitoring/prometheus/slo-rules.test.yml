@@ -1,0 +1,77 @@
+rule_files: [slo-rules.yml]
+evaluation_interval: 1m
+tests:
+  # Healthy traffic: availability stays at 1 and nothing fires. A quiet system must not
+  # look like a broken one.
+  - interval: 1m
+    input_series:
+      - series: 'secure_cloud_http_requests_total{method="GET",route="/api/files",status_code="200"}'
+        values: '0+600x20'
+    promql_expr_test:
+      - expr: secure_cloud:sli_availability:ratio_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'secure_cloud:sli_availability:ratio_rate5m'
+            value: 1
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SecureCloudAvailabilityFastBurn
+        exp_alerts: []
+
+  # 10% sustained server errors. 10% is 14.4x the 0.5% budget, so the fast-burn alert must
+  # be firing and the recorded ratio must be 0.9.
+  - interval: 1m
+    input_series:
+      - series: 'secure_cloud_http_requests_total{method="GET",route="/api/files",status_code="200"}'
+        values: '0+540x30'
+      - series: 'secure_cloud_http_requests_total{method="GET",route="/api/files",status_code="500"}'
+        values: '0+60x30'
+    promql_expr_test:
+      - expr: secure_cloud:sli_availability:ratio_rate5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'secure_cloud:sli_availability:ratio_rate5m'
+            value: 0.9
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SecureCloudAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels: {severity: critical, slo: availability-99.5-30d}
+            exp_annotations:
+              summary: 'Availability is burning budget 14.4x too fast'
+              runbook: 'deploy/RUNBOOKS.md#availability-fast-burn'
+
+  # 2% errors is only 4x the budget: too fast for a warning, not fast enough for a
+  # critical page. This is the case that proves the thresholds are doing work.
+  - interval: 1m
+    input_series:
+      - series: 'secure_cloud_http_requests_total{method="GET",route="/api/files",status_code="200"}'
+        values: '0+588x30'
+      - series: 'secure_cloud_http_requests_total{method="GET",route="/api/files",status_code="500"}'
+        values: '0+12x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SecureCloudAvailabilityFastBurn
+        exp_alerts: []
+
+  # Every upload failing burns the upload budget immediately.
+  - interval: 1m
+    input_series:
+      - series: 'secure_cloud_uploads_total{outcome="success"}'
+        values: '0+40x30'
+      - series: 'secure_cloud_uploads_total{outcome="failure"}'
+        values: '0+40x30'
+    promql_expr_test:
+      - expr: secure_cloud:sli_upload_success:ratio_rate5m
+        eval_time: 20m
+        exp_samples:
+          - labels: 'secure_cloud:sli_upload_success:ratio_rate5m'
+            value: 0.5
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SecureCloudUploadReliabilityFastBurn
+        exp_alerts:
+          - exp_labels: {severity: warning, slo: upload-success-99-30d}
+            exp_annotations:
+              summary: 'Upload failures are burning the upload budget 14.4x too fast'
+              runbook: 'deploy/RUNBOOKS.md#upload-failures'

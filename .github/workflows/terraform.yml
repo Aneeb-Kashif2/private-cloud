@@ -1,0 +1,132 @@
+name: Terraform
+
+# Infrastructure as code needs the same discipline as application code: formatting,
+# validation, provider-aware linting, a security scan, and a diff you can read before
+# anything is applied.
+#
+# The plan job is opt-in on purpose. It requires a remote state backend and a federated
+# AWS role, so it stays dormant until you set the repository variables
+# TF_PLAN_ENABLED=true and TF_PLAN_ROLE_ARN. Nothing here ever applies automatically:
+# applying infrastructure from a workflow that a pull request can trigger is how
+# accidental outages happen.
+
+on:
+  pull_request:
+    paths: ['infra/**', '.github/workflows/terraform.yml']
+  push:
+    branches: [main]
+    paths: ['infra/**']
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC, drift detection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: infra
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Format, validate, lint and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+      - name: Check formatting
+        run: terraform fmt -check -recursive -diff
+      - name: Initialise providers without a backend
+        # No state and no AWS credentials are needed for validation, so this job runs on
+        # forked pull requests without secrets.
+        run: terraform init -backend=false -input=false
+      - name: Validate
+        run: terraform validate -no-color
+      - uses: terraform-linters/setup-tflint@v4
+      - name: Lint with tflint
+        # Reads infra/.tflint.hcl and downloads the AWS ruleset.
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Checkov
+        run: pip install --disable-pip-version-check checkov
+      - name: Scan the configuration for security problems
+        # Starts as soft-fail (see infra/.checkov.yaml): triage the first run, record the
+        # real exceptions with reasons, then make it a hard gate.
+        run: checkov --config-file .checkov.yaml
+
+  plan:
+    name: Plan (opt-in, needs remote state)
+    needs: validate
+    if: >
+      vars.TF_PLAN_ENABLED == 'true' &&
+      (github.event_name == 'pull_request' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC: short-lived AWS credentials, no stored access keys
+    env:
+      AWS_REGION: ${{ vars.TF_PLAN_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+      - name: Initialise with the remote backend
+        run: terraform init
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          # -lock=false: planning is read-only and must not need lock-table permission.
+          terraform plan -no-color -lock=false -input=false -out=tfplan 2>&1 | tee plan.txt
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Publish the plan in the job summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform plan (${{ github.event_name }})"
+            echo
+            echo '```terraform'
+            # Cap the output: a large plan would otherwise exceed the summary size limit.
+            head -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report drift on the weekly run
+        if: github.event_name == 'schedule' && steps.plan.outcome == 'success'
+        run: |
+          if grep -qE '^No changes\.' plan.txt; then
+            echo 'No drift detected.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::error title=Infrastructure drift detected::The scheduled plan reported changes. Review the job summary.'
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terraform-plan
+          path: |
+            infra/plan.txt
+            infra/tfplan
+          retention-days: 14
