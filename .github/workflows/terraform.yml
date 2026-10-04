@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.9.8'
       - name: Check formatting
@@ -88,7 +88,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: '1.9.8'
       - name: Initialise with the remote backend
