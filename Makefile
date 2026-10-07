@@ -97,6 +97,14 @@ logs: ## Follow all container logs
 health: ## Check the public health endpoint through Nginx
 	curl --fail --silent --show-error --max-time 10 http://localhost:8080/health && printf '\n'
 
+.PHONY: cloudflare
+cloudflare: ## Start a Cloudflare Quick Tunnel and print its temporary URL
+	bash scripts/start-cloudflare.sh
+
+.PHONY: cloudflare-stop
+cloudflare-stop: ## Stop the managed Cloudflare Quick Tunnel
+	bash scripts/stop-cloudflare.sh
+
 .PHONY: metrics
 metrics: ## Print application metrics from the private loopback listener
 	curl --fail --silent --max-time 10 http://127.0.0.1:4001/metrics | grep -E '^secure_cloud_' | head -30
