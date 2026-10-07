@@ -73,6 +73,12 @@ bash install.sh --update
 
 For production, follow [split EC2/Ubuntu deployment](deploy/SPLIT_DEPLOYMENT.md): a named Cloudflare Tunnel terminates at EC2 Nginx, while `/api/*` travels over Tailscale to Ubuntu Nginx and Fastify. The browser remains same-origin and the backend uses an explicit `FRONTEND_ORIGIN`. Quick Tunnel commands are retained only for development/legacy use.
 
+For temporary HTTPS access to the running single-host stack, run `make cloudflare`
+from the repository root. It starts a managed Cloudflare Quick Tunnel to Nginx,
+waits for its public health check, and prints the temporary `trycloudflare.com`
+URL. Stop it with `make cloudflare-stop`. The application stack must already be
+running and healthy on port 8080; see the [Quick Tunnel setup](deploy/NGINX_CLOUDFLARE.md).
+
 Do not also start `npm run dev` while the app containers own ports 3000/4000. To use development mode instead, stop the application containers with `docker compose stop nginx frontend backend`, keep the Compose PostgreSQL/Redis services running, install workspace dependencies, and run:
 
 ```bash

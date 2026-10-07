@@ -37,7 +37,7 @@ export NEXT_PUBLIC_API_URL=/api
 export APP_UID=$(id -u)
 export APP_GID=$(id -g)
 docker compose up -d --build --wait --wait-timeout 120
-cloudflared tunnel --url http://localhost:8080
+make cloudflare
 ```
 
 For an already running host backend/frontend, start just Nginx:
@@ -47,6 +47,13 @@ docker compose up -d --no-deps nginx
 ```
 
 Open the tunnel's HTTPS URL for login. Production cookies are Secure and should stay that way; plain HTTP LAN access is not equivalent to HTTPS tunnel access. Sign in again when the temporary tunnel hostname changes, since cookies belong to the previous hostname.
+
+The managed tunnel survives closing the terminal. Start it with `make cloudflare`
+after the stack is healthy, and stop it with `make cloudflare-stop`. The start
+command prints the temporary URL only after the public `/health` endpoint returns
+HTTP 200. `bash scripts/start-cloudflare.sh` and
+`bash scripts/stop-cloudflare.sh` remain available if you prefer invoking the
+scripts directly.
 
 The Next.js development server also rewrites `/api/*` to the local backend, so the old tunnel command pointing to port 3000 can still work after restarting/rebuilding the frontend. Port 8080 is the entry point that actually uses Nginx.
 
