@@ -1,0 +1,8 @@
+[[allowlists]]
+description = "Historical Gitleaks false positive for a synthetic smoke-test AUTH_SECRET; the test now generates a random value at runtime."
+commits = ["fd745197ba4fa9268ba54fc53ad964212ec64773"]
+paths = ["^scripts/smoke-containers\\.sh$"]
+condition = "AND"
+fingerprints = [
+  "fd745197ba4fa9268ba54fc53ad964212ec64773:scripts/smoke-containers.sh:generic-api-key:27",
+]

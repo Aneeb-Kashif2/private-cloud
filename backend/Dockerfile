@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM node:26-bookworm-slim AS base
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 FROM base AS build
@@ -13,6 +13,7 @@ RUN npm run prisma:generate --workspace backend && npm run build --workspace bac
 RUN npm prune --omit=dev --workspace backend
 
 FROM base AS runtime
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 ENV NODE_ENV=production PORT=4000 STORAGE_PATH=/srv/secure-cloud-storage STORAGE_LIMIT_BYTES=5368709120
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/backend/package.json ./backend/package.json

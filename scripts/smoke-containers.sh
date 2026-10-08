@@ -20,12 +20,13 @@ for attempt in {1..60}; do
   sleep 1
 done
 db_url="postgresql://test:test@$prefix-postgres:5432/test"
+auth_secret=$(openssl rand -hex 32)
 docker run --rm --network "$prefix" -e DATABASE_URL="$db_url" "$backend_image" ../node_modules/.bin/prisma migrate deploy
 docker run -d --name "$prefix-backend" --network "$prefix" \
   --user "$(id -u):$(id -g)" -p 127.0.0.1::4000 \
   --mount "type=bind,source=$storage_dir,target=/srv/secure-cloud-storage" \
   -e DATABASE_URL="$db_url" -e REDIS_URL="redis://$prefix-redis:6379" \
-  -e AUTH_SECRET=smoke-test-secret-with-at-least-32-characters \
+  -e "AUTH_SECRET=$auth_secret" \
   -e FRONTEND_ORIGIN="*" "$backend_image" >/dev/null
 docker run -d --name "$prefix-frontend" --network "$prefix" -p 127.0.0.1::3000 "$frontend_image" >/dev/null
 sed -e "s/127.0.0.1:4000/$prefix-backend:4000/g" -e "s/127.0.0.1:3000/$prefix-frontend:3000/g" deploy/nginx/default.conf > "$nginx_dir/default.conf"
