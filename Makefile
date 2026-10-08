@@ -78,7 +78,11 @@ install: ## Run the idempotent Ubuntu installer
 	sudo bash install.sh
 
 .PHONY: up
-up: ## Build and start the single-host stack, gated on healthchecks
+up: ## Build and start the single-host stack with live container logs
+	$(COMPOSE) up --build
+
+.PHONY: up-detached
+up-detached: ## Build and start the stack in the background, gated on healthchecks
 	$(COMPOSE) up -d --build --wait --wait-timeout 180
 
 .PHONY: down
