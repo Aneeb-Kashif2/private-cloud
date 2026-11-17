@@ -102,7 +102,7 @@ health: ## Check the public health endpoint through Nginx
 	curl --fail --silent --show-error --max-time 10 http://localhost:8080/health && printf '\n'
 
 .PHONY: cloudflare
-cloudflare: ## Start a Cloudflare Quick Tunnel and print its temporary URL
+cloudflare: up-detached ## Start the stack and a Cloudflare Quick Tunnel; print its temporary URL
 	bash scripts/start-cloudflare.sh
 
 .PHONY: cloudflare-stop
